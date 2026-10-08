@@ -1,0 +1,88 @@
+---
+title: "Hardware Requirements for PC diZplay"
+sidebarTitle: "Requirements"
+description: "Full list of hardware components, pin assignments, and PC-side software prerequisites needed to build and run the PC diZplay ESP8266 monitor."
+---
+
+This page lists every hardware component, wiring prerequisite, and PC-side software dependency required to build and run PC diZplay. Assemble and verify all items here before proceeding to the [Quickstart](/quickstart).
+
+## Components
+
+| Component | Specification | Notes |
+|---|---|---|
+| Microcontroller | Wemos D1 Mini (ESP8266) | PlatformIO target: `d1_mini_lite` |
+| Display | ST7735, 0.96", 80×160 px | SPI interface, driven by the TFT_eSPI library |
+| Gesture sensor | APDS-9960 | I²C — SDA on GPIO4/D2, SCL on GPIO5/D1, INT on GPIO12/D6 |
+| Capacitor | 220 µF electrolytic | Required when the D1 Mini is powered from USB |
+| PC software | LibreHardwareMonitor | Must be running with the built-in web server enabled |
+
+## Pin assignments
+
+### APDS-9960 gesture sensor
+
+Pin definitions come directly from `APDSConfig.hpp`:
+
+```cpp
+#define APDS9960_SDA 4  // GPIO4  (D2) — I²C data
+#define APDS9960_SCL 5  // GPIO5  (D1) — I²C clock
+
+const byte APDS_INT = 12; // GPIO12 (D6) — active-low interrupt
+```
+
+The interrupt pin is configured as a falling-edge interrupt in `main.cpp`:
+
+```cpp
+Wire.begin(APDS9960_SDA, APDS9960_SCL);
+pinMode(digitalPinToInterrupt(APDS_INT), INPUT);
+attachInterrupt(digitalPinToInterrupt(APDS_INT), interruptRoutine, FALLING);
+```
+
+### ST7735 TFT display
+
+The ST7735 uses SPI. The exact CS, DC, RST, MOSI, and SCK pin numbers are defined inside **TFT_eSPI**'s `User_Setup` configuration file for the `d1_mini_lite` board — consult the TFT_eSPI documentation or the board-specific setup file included with the library for your exact wiring. The firmware calls `tft.init()` with rotation 3 (landscape) and uses two 80×80 px sprites (`img` and `img2`) that together fill the 160×80 display.
+
+## PC-side software
+
+### LibreHardwareMonitor
+
+PC diZplay has no local sensor reading capability — all hardware telemetry is sourced from LibreHardwareMonitor running on the monitored Windows PC.
+
+**Requirements:**
+
+- LibreHardwareMonitor must be **running** at all times while the device is in use.
+- The built-in web server must be **enabled** via **Options → Web Server → Run**.
+- Default port: **8085** (configurable in LibreHardwareMonitor).
+
+The device polls the following endpoint on every loop iteration:
+
+```
+GET http://<PC-IP>:<port>/data.json
+```
+
+The response is a deeply nested JSON tree. The firmware uses an ArduinoJson filter to extract only the `Value` fields at nesting depth 4:
+
+```cpp
+StaticJsonDocument<144> filter;
+filter["Children"][0]["Children"][0]["Children"][0]["Children"][0]["Value"] = true;
+
+DynamicJsonDocument doc(9144);
+deserializeJson(doc, http.getStream(),
+    DeserializationOption::Filter(filter),
+    DeserializationOption::NestingLimit(12));
+```
+
+The full LibreHardwareMonitor JSON response can exceed 100 KB; the filter ensures only the required leaf values are retained in the 9144-byte heap document.
+
+<Note>
+  If LibreHardwareMonitor is not reachable (wrong IP, server not running, PC asleep), the device increments an error counter. After **three consecutive errors within 60 seconds**, it automatically resets to AP mode so you can correct the URL via the captive portal without re-flashing.
+</Note>
+
+## Power notes
+
+The Wemos D1 Mini draws modest steady-state current, but the ESP8266 Wi-Fi radio produces sharp transient current spikes — up to several hundred milliamps — during each HTTP request. USB host ports and thin power cables often cannot supply these spikes cleanly, causing the supply voltage to dip below the ESP8266's minimum operating voltage and triggering a spontaneous reset.
+
+**Mitigation:** Place a **220 µF electrolytic capacitor** across the **5 V** and **GND** pins on the D1 Mini's supply rail. The capacitor acts as a local charge reservoir, absorbing the transient demand and preventing brown-out resets during Wi-Fi transmissions.
+
+<Warning>
+  Omitting the capacitor when USB-powered will likely result in intermittent resets during HTTP polling. This is noted in the original project changelog from 09/10/2022: *"Se agregó un capacitor de 220 µF en la alimentación."*
+</Warning>

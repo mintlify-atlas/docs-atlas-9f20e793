@@ -1,0 +1,62 @@
+---
+title: "PC diZplay Screen Menus and Displayed Metrics"
+sidebarTitle: "Menus"
+description: "PC diZplay organises hardware metrics across seven screens. Each screen surfaces a single sensor value on the 80×160 TFT display alongside a short label."
+---
+
+PC diZplay organises hardware metrics across seven screens defined by the `Menus` enum. Each screen shows a single metric value alongside a short label, keeping the display clean on the tiny 80×160 TFT.
+
+## The Seven Screens
+
+| Screen | Enum value | Label | Metric shown | Source in LHM JSON |
+|---|---|---|---|---|
+| GPU Temperature | `Gputemp` | `GPU:` | Temperature in °C | `Children[0][3][2][0].Value` |
+| GPU Load | `Gpuload` | `GPU:` | Load percentage | `Children[0][3][3][0].Value` |
+| GPU Fan | `Gpufan` | `FAN:` | Fan speed (first 2 digits) | `Children[0][3][4][0].Value` |
+| CPU Temperature | `Cputemp` | `CPU:` | Package temp °C | `Children[0][1][3][6].Value` |
+| CPU Load | `Cpuload` | `CPU:` | Total load % | `Children[0][1][4][0].Value` |
+| RAM Usage | `RAM` | `RAM:` | Used RAM in GB | `Children[0][2][0][0].Value` |
+| Clock | `Reloj` | *(none)* | NTP time HH:MM:SS | `timeClient.getFormattedTime()` |
+
+### Default screen
+
+The device starts on the **`Reloj`** (clock) screen. This is set directly in `ST7735Config.hpp`:
+
+```cpp ST7735Config.hpp
+uint8_t Pantalla = Reloj;
+```
+
+## Display Layout
+
+Each screen is composed of two 80×80 pixel sprites that together fill the 160×80 display area:
+
+| Sprite | Position | Content |
+|---|---|---|
+| `img2` (left) | `x=0, y=0` | Metric label (e.g. `GPU:`, `CPU:`, `RAM:`, `FAN:`) |
+| `img` (right) | `x=80, y=0` | Metric value |
+
+For all hardware metric screens the label is drawn with `drawtext()` in `CambioPantalla()`, and the value is drawn with `drawvalor()`. The value is always the first 2 characters of the raw JSON string, extracted via `.substring(0, 2)`. The clock screen inverts which sprite carries which content — see [Clock Mode](/usage/clock-mode) for the exact split.
+
+<Info>
+  Values from LibreHardwareMonitor are truncated to 2 characters. For example, a GPU temperature reading of `"65.0 °C"` becomes `"65"`, and a fan speed of `"1 800 RPM"` becomes `"1 "`. The clock screen is the only exception — it uses the full `HH:MM:SS` formatted string and splits it across both sprites.
+</Info>
+
+## Enum Definition
+
+The full `Menus` enum as declared in `ST7735Config.hpp`:
+
+```cpp ST7735Config.hpp
+enum Menus
+{
+  Gputemp,
+  Gpuload,
+  Gpufan,
+  Cputemp,
+  Cpuload,
+  RAM,
+  Reloj
+
+} Menus;
+```
+
+The active screen is stored in the global `uint8_t Pantalla` variable. Gesture handling in `main.cpp` updates `Pantalla`, and `CambioPantalla()` redraws the label sprite to match.

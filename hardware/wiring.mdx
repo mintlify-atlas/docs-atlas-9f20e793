@@ -1,0 +1,67 @@
+---
+title: "Wiring the PC diZplay Hardware Components"
+sidebarTitle: "Wiring"
+description: "How to connect the Wemos D1 Mini to the ST7735 TFT display and APDS-9960 gesture sensor, including capacitor placement for stable USB power."
+---
+
+This page covers all the physical connections between the Wemos D1 Mini, the ST7735 TFT display, and the APDS-9960 gesture sensor. It also explains where to place the 220µF decoupling capacitor required for reliable USB-powered operation.
+
+<Note>
+  The README includes a full wiring diagram photograph showing all three components connected together. You can view it at the [project repository](https://github.com/IsaiasGatica/PC-diZplay) or directly via the image at:
+  `https://user-images.githubusercontent.com/52428096/195724783-010c7869-5348-44a4-9799-43330b96c2d9.png`
+
+  Always use that diagram as the authoritative reference alongside the tables below.
+</Note>
+
+## APDS-9960 Gesture Sensor Connections
+
+The APDS-9960 communicates over I2C. The pin assignments are defined in `include/APDSConfig.hpp`:
+
+```cpp APDSConfig.hpp
+#define APDS9960_SDA 4  // GPIO4 (D2)
+#define APDS9960_SCL 5  // GPIO5 (D1)
+
+const byte APDS_INT = 12; // GPIO12 (D6)
+```
+
+Wire the sensor to the Wemos D1 Mini as follows:
+
+| APDS-9960 Pin | Wemos D1 Mini Pin | GPIO    |
+|---------------|-------------------|---------|
+| SDA           | D2                | GPIO4   |
+| SCL           | D1                | GPIO5   |
+| INT           | D6                | GPIO12  |
+| VCC           | 3.3V              | —       |
+| GND           | GND               | —       |
+
+<Warning>
+  The APDS-9960 is a **3.3 V device**. Do **not** connect its VCC pin to the 5 V rail. Doing so will permanently damage the sensor.
+</Warning>
+
+## ST7735 TFT Display Connections
+
+The ST7735 uses SPI. With the TFT_eSPI library on the Wemos D1 Mini, connect the display as follows:
+
+| TFT Pin   | Wemos D1 Mini  |
+|-----------|----------------|
+| CS        | D8 / GPIO15    |
+| DC / RS   | D3 / GPIO0     |
+| RST       | RST or D4      |
+| SDA / MOSI| D7 / GPIO13    |
+| SCK       | D5 / GPIO14    |
+| VCC       | 3.3V           |
+| GND       | GND            |
+
+<Note>
+  Exact SPI pin assignments are configured in the TFT_eSPI `User_Setup.h` file. Verify that the pin numbers defined there match your specific display module's pin labels before powering up for the first time.
+</Note>
+
+## Capacitor Placement
+
+Place a **220µF electrolytic capacitor** between the **5 V power rail** and **GND**, positioned as close as physically possible to the Wemos D1 Mini's power pins.
+
+This capacitor is **required** when powering the board from USB. During Wi-Fi transmission bursts the ESP8266 can draw current spikes of several hundred milliamps. Without adequate bulk capacitance, these spikes cause the supply voltage to droop and trigger brownout resets, interrupting display updates and network requests.
+
+- Polarity: the **positive leg** goes to 5 V, the **negative leg** goes to GND.
+- Value: 220µF (the original build uses an electrolytic; a low-ESR type is preferred).
+- If you are powering the board from a regulated bench supply or a dedicated 5 V adapter rated at 2 A or more, the capacitor is still recommended as a precaution.

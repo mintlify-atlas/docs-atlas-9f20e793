@@ -1,0 +1,180 @@
+---
+title: "Navigating PC diZplay Screens with Hand Gestures"
+sidebarTitle: "Gestures"
+description: "PC diZplay uses the APDS-9960 sensor to detect four swipe directions, letting you navigate all seven hardware metric screens hands-free."
+---
+
+PC diZplay reads swipe gestures from the APDS-9960 sensor to switch between hardware metric screens without touching the device. The interrupt-driven architecture means the display continues updating while the sensor waits for input.
+
+## Gesture Directions at a Glance
+
+| Direction | Purpose |
+|---|---|
+| **LEFT / RIGHT** | Switch between hardware categories (GPU → CPU → RAM → Clock) |
+| **UP / DOWN** | Cycle through sub-metrics within the GPU or CPU category (temperature ↔ load, temperature ↔ fan) |
+
+## Full Gesture Map
+
+The complete transition table produced by `gestos()` in `main.cpp`:
+
+| Gesture | Current Screen | Next Screen |
+|---|---|---|
+| UP | `Gputemp` | `Gpuload` |
+| UP | `Cputemp` | `Cpuload` |
+| UP | `Gpufan` | `Gputemp` |
+| DOWN | `Gpuload` | `Gputemp` |
+| DOWN | `Gputemp` | `Gpufan` |
+| DOWN | `Cpuload` | `Cputemp` |
+| RIGHT | `Gputemp` or `Gpuload` | `Cputemp` |
+| RIGHT | `Cputemp` or `Cpuload` | `RAM` |
+| RIGHT | `Reloj` | `Gputemp` |
+| RIGHT | `RAM` | `Gputemp` |
+| LEFT | `Gputemp` or `Gpuload` | `Reloj` |
+| LEFT | `Cputemp` or `Cpuload` | `Gputemp` |
+| LEFT | `RAM` | `Cputemp` |
+
+## `gestos()` Source
+
+```cpp main.cpp
+void gestos()
+{
+  if (apds.isGestureAvailable())
+  {
+    switch (apds.readGesture())
+    {
+    case DIR_UP:
+      if (Pantalla == Gputemp)
+      {
+        Pantalla = Gpuload;
+      }
+      else if (Pantalla == Cputemp)
+      {
+        Pantalla = Cpuload;
+      }
+      else if (Pantalla == Gpufan)
+      {
+        Pantalla = Gputemp;
+      }
+      break;
+
+    case DIR_DOWN:
+      if (Pantalla == Gpuload)
+      {
+        Pantalla = Gputemp;
+      }
+      else if (Pantalla == Gputemp)
+      {
+        Pantalla = Gpufan;
+      }
+      else if (Pantalla == Cpuload)
+      {
+        Pantalla = Cputemp;
+      }
+      break;
+
+    case DIR_RIGHT:
+      if (Pantalla == Gputemp || Pantalla == Gpuload)
+      {
+        Pantalla = Cputemp;
+      }
+      else if (Pantalla == Cputemp || Pantalla == Cpuload)
+      {
+        Pantalla = RAM;
+      }
+      else if (Pantalla == Reloj)
+      {
+        Pantalla = Gputemp;
+      }
+      else if (Pantalla == RAM)
+      {
+        Pantalla = Gputemp;
+      }
+      break;
+
+    case DIR_LEFT:
+      if (Pantalla == Gputemp || Pantalla == Gpuload)
+      {
+        Pantalla = Reloj;
+      }
+      else if (Pantalla == Cputemp || Pantalla == Cpuload)
+      {
+        Pantalla = Gputemp;
+      }
+      else if (Pantalla == RAM)
+      {
+        Pantalla = Cputemp;
+      }
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+```
+
+## How It Works Technically
+
+The gesture system uses a hardware interrupt so the display render loop is never blocked waiting for input.
+
+**Pin assignment** (`APDSConfig.hpp`):
+
+```cpp APDSConfig.hpp
+#define APDS9960_SDA 4  // GPIO4 (D2)
+#define APDS9960_SCL 5  // GPIO5 (D1)
+
+const byte APDS_INT = 12; // GPIO12 (D6)
+boolean isr_flag = 0;
+```
+
+**Interrupt service routine** — placed in IRAM so it executes safely during flash reads:
+
+```cpp main.cpp
+void IRAM_ATTR interruptRoutine()
+{
+  isr_flag = 1;
+}
+```
+
+**Main loop gesture handling**:
+
+```cpp main.cpp
+if (isr_flag == 1)
+{
+  detachInterrupt(digitalPinToInterrupt(APDS_INT));
+  gestos();
+  CambioPantalla(Pantalla);
+  isr_flag = 0;
+  attachInterrupt(digitalPinToInterrupt(APDS_INT), interruptRoutine, FALLING);
+}
+```
+
+The sequence is:
+
+1. The APDS-9960 pulls `APDS_INT` (GPIO12/D6) **low** when a gesture is complete.
+2. The falling-edge interrupt fires `interruptRoutine()`, which sets `isr_flag = 1` in IRAM.
+3. On the next `loop()` iteration the interrupt is **detached** so no new interrupt fires while the gesture is being read.
+4. `gestos()` reads and processes the gesture direction, updating `Pantalla`.
+5. `CambioPantalla()` redraws the label sprite for the new screen.
+6. `isr_flag` is cleared and the interrupt is **re-attached**.
+
+This detach/re-attach pattern prevents spurious re-entrancy and is the recommended approach for interrupt-driven I²C on the ESP8266.
+
+**Sensor initialisation** (`APDSConfig.hpp`):
+
+```cpp APDSConfig.hpp
+void startupAPDS()
+{
+  apds.init();
+  apds.enableGestureSensor(true);
+  apds.setGestureGain(0);
+}
+```
+
+`setGestureGain(0)` selects the lowest IR gain setting (1×). Raise this value if gestures are being missed.
+
+<Tip>
+  - Gestures work best with a **slow, deliberate hand movement** held 5–10 cm above the sensor.
+  - `setGestureGain(0)` is the lowest gain setting. If detection is unreliable in your environment, increase it to `1`, `2`, or `3` in `APDSConfig.hpp`.
+  - Bright ambient infrared light — such as direct sunlight — can interfere with gesture detection. Try shading the sensor or reducing the gain threshold.
+</Tip>

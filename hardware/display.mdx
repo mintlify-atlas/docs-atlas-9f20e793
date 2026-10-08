@@ -1,0 +1,143 @@
+---
+title: "ST7735 TFT Display Configuration for PC diZplay"
+sidebarTitle: "TFT Display"
+description: "Configure the ST7735 0.96\" 80×160 TFT display for PC diZplay, including landscape orientation, dual-sprite flicker-free rendering, and custom fonts."
+---
+
+PC diZplay uses a 0.96″ ST7735 80×160 TFT display driven by the [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) library (Bodmer). To eliminate flicker during rapid value updates, the firmware splits the screen into two independent 80×80 sprite zones that are pushed to the display independently rather than redrawn from scratch on every frame.
+
+## Display Specifications
+
+| Property    | Value                    |
+|-------------|--------------------------|
+| Controller  | ST7735                   |
+| Resolution  | 80 × 160 pixels          |
+| Interface   | SPI                      |
+| Library     | TFT_eSPI (Bodmer)        |
+| PlatformIO  | `bodmer/TFT_eSPI@^2.4.76`|
+
+## Screen Layout
+
+The display is initialised in landscape orientation via `setRotation(3)`, which makes the visible area **160 px wide × 80 px tall**. That area is then divided into two 80×80 sprites:
+
+| Sprite | Object | `pushSprite` x | Normal screens              | Clock screen (`Reloj`)        |
+|--------|--------|----------------|-----------------------------|-------------------------------|
+| Left   | `img`  | `0`            | Metric label (`GPU:`, `CPU:`, `RAM:`, `FAN:`) | Seconds (`SS`) — last 2 chars |
+| Right  | `img2` | `80`           | Numeric value               | Hours + minutes (`HH:MM`) — first 3 chars |
+
+For the **Reloj** (clock) screen the roles are swapped: `img2` is pushed to `x=0` and displays the `HH:MM` portion of the NTP time string (first 3 characters, e.g. `"12:"`), while `img` is pushed to `x=80` and displays the seconds (last 2 characters, e.g. `"45"`).
+
+## Initialisation — `startupST7735()`
+
+`startupST7735()` is called once in `setup()`. It initialises the TFT driver, sets rotation and byte-swap mode, then creates and blanks both sprites:
+
+```cpp ST7735Config.hpp
+TFT_eSPI tft = TFT_eSPI();
+TFT_eSprite img  = TFT_eSprite(&tft);
+TFT_eSprite img2 = TFT_eSprite(&tft);
+
+void startupST7735()
+{
+  tft.init();
+  tft.setRotation(3);
+  tft.setSwapBytes(true);
+
+  img.createSprite(80, 80);
+  img.fillScreen(TFT_BLACK);
+  img.setFreeFont(&Orbitron_Medium_27);
+  img.setTextColor(TFT_WHITE, TFT_BLACK);
+  img.setTextSize(1);
+  img.pushSprite(0, 0);
+
+  img2.createSprite(80, 80);
+  img2.fillScreen(TFT_BLACK);
+  img2.pushSprite(80, 0);
+}
+```
+
+- **`tft.setRotation(3)`** — rotates the 80×160 panel 90 degrees so it is wider than it is tall.
+- **`tft.setSwapBytes(true)`** — corrects the RGB byte order for the ST7735 colour format expected by TFT_eSPI.
+- **`img.createSprite(80, 80)`** — allocates an off-screen framebuffer for the left half; drawing here never touches the physical display until `pushSprite` is called.
+- **`img2.createSprite(80, 80)`** — same for the right half.
+
+## Updating Values — `drawvalor()`
+
+`drawvalor()` is called every loop iteration with the latest data from LibreHardwareMonitor (or the NTP clock). It updates only the right-hand sprite for regular metrics, or swaps the sprite roles for the clock screen:
+
+```cpp ST7735Config.hpp
+void drawvalor(String valor)
+{
+  if (Pantalla == Reloj)
+  {
+    img2.fillScreen(TFT_BLACK);
+    img2.setTextSize(1);
+    img2.drawString(valor.substring(0, 3), 10, 20, 7);
+    img2.pushSprite(0, 0);
+
+    img.fillScreen(TFT_BLACK);
+    img.setTextSize(1);
+    img.drawString(valor.substring(3, 5), 5, 20, 7);
+    img.pushSprite(80, 0);
+  }
+  else
+  {
+    img2.fillScreen(TFT_BLACK);
+    img2.setTextSize(1);
+    img2.drawString(valor, 10, 20, 7);
+    img2.pushSprite(80, 0);
+  }
+}
+```
+
+- The **font index `7`** passed as the last argument to `drawString()` selects TFT_eSPI's large built-in seven-segment-style number font, which gives crisp, bold numerals at any size.
+- For the clock, `valor` contains the full NTP time string (e.g. `"12:45:09"`). `substring(0, 3)` extracts `"12:"` and `substring(3, 5)` extracts `"45"`.
+
+## Switching the Label — `CambioPantalla()`
+
+`CambioPantalla()` is called after a gesture is detected. It redraws the left sprite with the correct metric label for the newly selected screen:
+
+```cpp ST7735Config.hpp
+void CambioPantalla(uint8_t Pantalla)
+{
+  switch (Pantalla)
+  {
+  case Gputemp:
+    drawtext("GPU:", 8, 25);
+    break;
+  case Gpuload:
+    drawtext("GPU:", 8, 25);
+    break;
+  case Cputemp:
+    drawtext("CPU:", 8, 25);
+    break;
+  case Cpuload:
+    drawtext("CPU:", 8, 25);
+    break;
+  case RAM:
+    drawtext("RAM:", 8, 25);
+    break;
+  case Gpufan:
+    drawtext("FAN:", 8, 25);
+    break;
+  default:
+    break;
+  }
+}
+```
+
+`drawtext()` fills the left sprite (`img`) with black, draws the label string using the Orbitron font, and pushes it to `x=0`. The `Reloj` case has no label — the entire 160 px width is used for the clock digits, so `CambioPantalla()` simply falls through to `default` and does nothing.
+
+## Custom Fonts
+
+The project bundles several bitmap fonts in `include/Fuentes/`:
+
+| File         | Font name / purpose                                             |
+|--------------|-----------------------------------------------------------------|
+| `font.h`     | **`Orbitron_Medium_27`** — used for metric labels on `img`      |
+| `Org_01.h`   | Alternative compact font                                        |
+| `7bit.h`     | Seven-segment style (alternative numeric display)               |
+| `Gpu.h`      | GPU-specific decorative font variant                            |
+| `Gpu2.h`     | GPU-specific decorative font variant 2                          |
+| `Gpu3.h`     | GPU-specific decorative font variant 3 (active include)         |
+
+The firmware currently includes `font.h` (for labels) and `Gpu3.h` via `ST7735Config.hpp`. Numeric values on the right sprite use TFT_eSPI's built-in font 7 (`drawString(..., 7)`), which does not require a separate header.

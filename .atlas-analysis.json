@@ -1,0 +1,83 @@
+{
+  "projectType": "general",
+  "projectName": "PC diZplay",
+  "projectDescription": "An ESP8266-based external PC hardware monitor that displays real-time CPU, GPU, and RAM stats on a tiny TFT screen, navigated via gesture sensor and configured through a captive-portal web interface.",
+  "theme": "aspen",
+  "primaryColor": "#9400D3",
+  "lightColor": "#BA55D3",
+  "darkColor": "#5B0099",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "hardware-requirements"
+            ]
+          },
+          {
+            "group": "Hardware Setup",
+            "pages": [
+              "hardware/wiring",
+              "hardware/display",
+              "hardware/gesture-sensor"
+            ]
+          },
+          {
+            "group": "Firmware",
+            "pages": [
+              "firmware/building-flashing",
+              "firmware/configuration",
+              "firmware/wifi-setup"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/menus",
+              "usage/gesture-navigation",
+              "usage/clock-mode"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/libre-hardware-monitor",
+              "reference/partition-layout",
+              "reference/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time display of GPU temperature, GPU load, GPU fan speed, CPU temperature, CPU load, and RAM usage on a 0.96\" ST7735 TFT screen",
+    "Gesture-based menu navigation using the APDS-9960 sensor (swipe up/down/left/right)",
+    "Data sourced from LibreHardwareMonitor's built-in web server over Wi-Fi",
+    "Captive-portal AP mode for initial Wi-Fi and LibreHardwareMonitor URL configuration",
+    "NTP-based clock display when not polling hardware data",
+    "Built with PlatformIO for the Wemos D1 Mini (ESP8266) target",
+    "Credentials and settings persisted in SPIFFS (LittleFS)"
+  ],
+  "publicApiSurface": [
+    "setup() — initialises SPIFFS, TFT, APDS-9960, Wi-Fi, and NTP",
+    "loop() — processes gesture ISR, updates display, or runs DNS server in AP mode",
+    "gestos() — reads APDS-9960 gesture and transitions the active screen (Menus enum)",
+    "getJSONdata(uint8_t Pantalla) — fetches LibreHardwareMonitor /data.json and extracts the value for the current screen",
+    "startupWifi() — reads credentials from SPIFFS and connects to the configured network",
+    "startAP() — brings up the Wi-Fi AP + DNS captive portal",
+    "initServer() — registers ESPAsyncWebServer routes (GET / and POST /)",
+    "startupST7735() — initialises the TFT and creates the two display sprites",
+    "startupAPDS() — initialises the APDS-9960 gesture engine",
+    "drawvalor(String valor) — renders the numeric/time value on the right sprite",
+    "CambioPantalla(uint8_t Pantalla) — renders the label text on the left sprite",
+    "Modowifi() — returns true when the device should start in AP mode (EEPROM flag)",
+    "defaultWifi() — clears the AP-mode flag and reboots to AP mode",
+    "Menus enum: Gputemp, Gpuload, Gpufan, Cputemp, Cpuload, RAM, Reloj"
+  ]
+}

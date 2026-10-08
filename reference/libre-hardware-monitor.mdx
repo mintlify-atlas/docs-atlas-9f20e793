@@ -1,0 +1,113 @@
+---
+title: "LibreHardwareMonitor Integration with PC diZplay"
+sidebarTitle: "LibreHardwareMonitor"
+description: "PC diZplay polls LibreHardwareMonitor's HTTP server, parses a filtered JSON tree to minimise ESP8266 RAM use, and maps sensor values to display screens."
+---
+
+PC diZplay reads hardware sensor data from LibreHardwareMonitor's (LHM) built-in HTTP web server. This page explains how to configure LHM, what endpoint is polled, and how the firmware parses the response.
+
+## Enabling the LHM web server
+
+1. Download LibreHardwareMonitor from [https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases).
+2. Run LHM **as administrator** — elevated privileges are required for hardware sensor access.
+3. Open **Options → Web Server** and check **Run**.
+4. The default port is **8085**.
+5. Verify the server is working by opening `http://localhost:8085/data.json` in a browser. You should see a large JSON document containing all detected sensors.
+
+## The data endpoint
+
+`getJSONdata()` in `WiFiMonitorPC.hpp` issues an HTTP GET request to:
+
+```
+GET http://<IP>:<port>/data.json
+```
+
+The response is a deeply nested JSON tree enumerating every hardware node and sensor LHM has detected. An abbreviated example of the structure relevant to PC diZplay is shown below:
+
+```json
+{
+  "Children": [{
+    "Children": [
+      { /* index 0: motherboard */ },
+      { /* index 1: CPU */ "Children": [
+        {},
+        {},
+        {},
+        { "Children": [ /* temperature sensors */ ] },
+        { "Children": [ /* load sensors      */ ] }
+      ]},
+      { /* index 2: RAM */ "Children": [
+        { "Children": [{ "Value": "7.8 GB" }] }
+      ]},
+      { /* index 3: GPU */ "Children": [
+        {},
+        {},
+        { "Children": [{ "Value": "65.0 °C"  }] },
+        { "Children": [{ "Value": "80 %"      }] },
+        { "Children": [{ "Value": "1200 RPM"  }] }
+      ]}
+    ]
+  }]
+}
+```
+
+## JSON filter
+
+The full `data.json` response is far too large to hold in the ESP8266's heap. To keep memory usage manageable, the firmware uses ArduinoJson's `DeserializationOption::Filter` to discard every node that does not carry a `"Value"` key:
+
+```cpp WiFiMonitorPC.hpp
+StaticJsonDocument<144> filter;
+filter["Children"][0]["Children"][0]["Children"][0]["Children"][0]["Value"] = true;
+
+DynamicJsonDocument doc(9144);
+DeserializationError error = deserializeJson(
+    doc, http.getStream(),
+    DeserializationOption::Filter(filter),
+    DeserializationOption::NestingLimit(12)
+);
+```
+
+Only nodes that have a `"Value"` key at depth 5 of the `Children` chain are retained during parsing; everything else is discarded on the fly. This keeps the working document at **9144 bytes**, small enough to coexist with the display and gesture-sensor code. A `NestingLimit` of 12 is set to accommodate the deepest branches of the LHM JSON tree.
+
+## Sensor path reference
+
+Once filtered, each metric is accessed by its position in the `doc["Children"][0]["Children"][...]` chain:
+
+| Metric | JSON path from `doc["Children"][0]` |
+|---|---|
+| GPU Temperature | `["Children"][3]["Children"][2]["Children"][0]["Value"]` |
+| GPU Load | `["Children"][3]["Children"][3]["Children"][0]["Value"]` |
+| GPU Fan Speed | `["Children"][3]["Children"][4]["Children"][0]["Value"]` |
+| CPU Temperature (Package) | `["Children"][1]["Children"][3]["Children"][6]["Value"]` |
+| CPU Load (Total) | `["Children"][1]["Children"][4]["Children"][0]["Value"]` |
+| RAM Used | `["Children"][2]["Children"][0]["Children"][0]["Value"]` |
+
+Each raw `Value` string (e.g. `"65.0 °C"`) is trimmed to its first two characters before being sent to the display.
+
+<Warning>
+  These paths are derived from a specific hardware configuration. If your
+  sensor tree has a different number of entries — for example a different GPU
+  model, multiple CPUs, or extra temperature probes — the child indices will
+  shift. Inspect the raw JSON returned by your LHM instance and update the
+  array indices inside `getJSONdata()` in `WiFiMonitorPC.hpp` to match.
+</Warning>
+
+## Error handling
+
+If `deserializeJson()` fails (due to an HTTP error, a timeout, or malformed JSON), `CountError` is incremented and the elapsed time since the last failure is checked:
+
+```cpp WiFiMonitorPC.hpp
+if (error)
+{
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    CountError++;
+    tiempo2 = millis() - tiempo2;
+    if ((CountError > 3) && (tiempo2 < 60000))
+    {
+        defaultWifi();
+    }
+}
+```
+
+If more than **3 errors** occur within a **60-second window**, `defaultWifi()` is called — EEPROM byte 250 is set to `0` and the ESP8266 restarts into AP mode. This prevents the device from appearing frozen when the host PC is rebooted or LHM is not running.

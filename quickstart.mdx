@@ -1,47 +1,110 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with PC diZplay in 4 Steps"
+sidebarTitle: "Quickstart"
+description: "Flash the PC diZplay firmware onto a Wemos D1 Mini, configure Wi-Fi via the captive portal, and start monitoring PC hardware stats in minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+This guide walks you through everything needed to go from an empty Wemos D1 Mini to a working PC hardware monitor: building and flashing the firmware, uploading the SPIFFS filesystem, and configuring the device to connect to your local network and LibreHardwareMonitor instance.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+<Note>
+  **Prerequisites — gather these before you start:**
 
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+  - Wemos D1 Mini (ESP8266)
+  - ST7735 0.96" 80×160 TFT display
+  - APDS-9960 gesture sensor
+  - 220 µF electrolytic capacitor (required when powering from USB)
+  - [PlatformIO](https://platformio.org/) installed — either the VS Code extension or the standalone CLI
+  - [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) running on your Windows PC with its web server enabled
+</Note>
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Enable the LibreHardwareMonitor web server">
+    PC diZplay pulls all hardware data from LibreHardwareMonitor's built-in HTTP endpoint, so the web server must be running before the device can display any metrics.
+
+    1. Open **LibreHardwareMonitor** on your Windows PC.
+    2. In the menu bar, go to **Options → Web Server**.
+    3. Tick **Run** to start the server. The default port is **8085**.
+    4. Note your PC's local IP address (e.g. `192.168.1.40`). You will need it during the captive-portal configuration step.
+
+    Once enabled, you can verify the server is working by navigating to `http://<your-PC-IP>:8085/data.json` in a browser — you should see a large JSON tree.
+  </Step>
+
+  <Step title="Clone the repository and open the project">
+    Clone the project from GitHub and open it with PlatformIO:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/IsaiasGatica/PC-diZplay.git
+    cd PC-diZplay
+    ```
+
+    **VS Code:** Open the cloned folder. The PlatformIO extension detects `platformio.ini` automatically and prompts you to open the project workspace.
+
+    **CLI only:** Run `pio run` from the project root to verify the toolchain and dependencies are installed correctly. PlatformIO resolves all library dependencies listed in `platformio.ini` on the first build.
+
+    The project targets the `d1_mini_lite` board environment:
+
+    ```ini
+    [env:d1_mini_lite]
+    platform  = espressif8266
+    board     = d1_mini_lite
+    framework = arduino
+    monitor_speed = 115200
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Upload the filesystem and flash the firmware">
+    PC diZplay stores Wi-Fi credentials and the captive-portal web page in SPIFFS. You must upload the filesystem **before** (or alongside) the firmware, otherwise the device cannot serve the configuration page or read saved credentials.
+
+    Upload the SPIFFS image first, then flash the firmware:
 
     ```bash
-    your-cli init
+    # 1. Build and upload the SPIFFS filesystem image
+    #    (contains index.html, pass.txt, red.txt, url.txt, and Bootstrap CSS)
+    pio run --target uploadfs
+
+    # 2. Compile and flash the firmware
+    pio run --target upload
     ```
+
+    After flashing, open the serial monitor to watch boot output:
+
+    ```bash
+    pio device monitor --baud 115200
+    ```
+
+    The device will boot and — because no credentials are saved yet — enter **AP mode** automatically.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
-    ```
+  <Step title="Configure Wi-Fi and LibreHardwareMonitor URL via the captive portal">
+    On first boot (or any time credentials are cleared), PC diZplay starts a Wi-Fi access point so you can configure it without touching the firmware.
+
+    1. On your phone or laptop, open your Wi-Fi settings and connect to the network named **`Pc diZplay`**.
+    2. A captive-portal browser window should open automatically. If it does not, navigate to **`http://192.168.1.1`** manually.
+    3. Fill in the configuration form:
+       - **Wi-Fi SSID** — the name of your home/office network.
+       - **Wi-Fi Password** — your network password.
+       - **LibreHardwareMonitor URL** — the IP address and port of your PC, e.g. `192.168.1.40:8085`.
+    4. Click **Submit**. The device saves the credentials to SPIFFS and restarts automatically.
+
+    After rebooting, PC diZplay connects to your Wi-Fi network, syncs the time via NTP, and begins polling LibreHardwareMonitor. The TFT display switches from the "Modo AP" splash to the first hardware metric screen.
+
+    <Note>
+      If the device cannot reach LibreHardwareMonitor after three consecutive failures within 60 seconds, it resets itself back to AP mode so you can correct the URL without re-flashing.
+    </Note>
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## After setup: gesture navigation
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+Once the device is running normally, use the APDS-9960 to navigate between screens:
+
+| Gesture | Action |
+|---|---|
+| Swipe **right** | Next metric category (GPU → CPU → RAM → Clock → GPU) |
+| Swipe **left** | Previous metric category (GPU → Clock → RAM → CPU → GPU) |
+| Swipe **up** | Next GPU sub-metric (Temperature → Load → Fan speed) |
+| Swipe **down** | Previous GPU sub-metric (Fan speed → Load → Temperature) |
+
+<Tip>
+  The **220 µF capacitor** is not optional when powering the D1 Mini from USB. Wi-Fi radio bursts draw transient current spikes that can cause the ESP8266 to brown-out and reset mid-request. Placing the capacitor across the 5 V and GND rails of the D1 Mini absorbs these spikes and prevents spurious reboots. See the [Hardware Requirements](/hardware-requirements) page for placement details.
 </Tip>

@@ -1,0 +1,105 @@
+---
+title: "Build and Flash PC diZplay Firmware with PlatformIO"
+sidebarTitle: "Build & Flash"
+description: "Learn how to build and upload the PC diZplay firmware binary and SPIFFS filesystem image to a Wemos D1 Mini Lite using PlatformIO CLI or VS Code."
+---
+
+The PC diZplay firmware is built and deployed with [PlatformIO](https://platformio.org/), targeting the **Wemos D1 Mini Lite** (`d1_mini_lite`). Every deployment involves two separate flash operations: uploading the **SPIFFS filesystem image** (which holds the web portal and credentials files) and uploading the **firmware binary** itself.
+
+<Note>
+  **Prerequisites before you begin:**
+  - PlatformIO must be installed — either via the [VS Code PlatformIO extension](https://platformio.org/install/ide?install=vscode) or with `pip install platformio`.
+  - Connect the D1 Mini to your computer with a USB data cable (not a charge-only cable).
+</Note>
+
+## Project configuration
+
+The full PlatformIO configuration for PC diZplay is shown below. It targets the ESP8266 platform, uses the Arduino framework, applies a custom partition table without OTA, and pins the CPU clock to 80 MHz.
+
+```ini platformio.ini
+[platformio]
+data_dir = src/data
+
+[env:d1_mini_lite]
+platform = espressif8266
+board = d1_mini_lite
+monitor_speed = 115200
+framework = arduino
+board_build.partitions = partition_sinOTA.csv
+board_build.f_cpu = 80000000L
+lib_deps =
+    bodmer/TFT_eSPI@^2.4.76
+    bblanchon/ArduinoJson@^6.19.4
+    arduino-libraries/NTPClient@^3.2.1
+    ottowinter/ESPAsyncWebServer-esphome @ ^2.1.0
+```
+
+The `data_dir = src/data` directive tells PlatformIO to use the `src/data/` folder as the root of the SPIFFS image. The `partition_sinOTA.csv` partition table allocates a 512 KB SPIFFS partition and removes the OTA partition to maximise available flash for the filesystem.
+
+## Build and upload
+
+<Steps>
+  <Step title="Install dependencies">
+    PlatformIO automatically resolves all `lib_deps` on the first build. Run the following command from the project root to compile and verify that all libraries download correctly:
+
+    ```bash
+    pio run
+    ```
+
+    You will see PlatformIO fetch `TFT_eSPI`, `ArduinoJson`, `NTPClient`, and `ESPAsyncWebServer-esphome` into the `.pio/libdeps/` directory.
+  </Step>
+
+  <Step title="Upload the SPIFFS filesystem image">
+    The SPIFFS image **must be flashed before the firmware** if this is a fresh device or if the credential files have been wiped. This step uploads the entire contents of `src/data/` — including `index.html`, `pass.txt`, `red.txt`, and `url.txt` — to the SPIFFS partition on the chip.
+
+    ```bash
+    pio run --target uploadfs
+    ```
+
+    PlatformIO will build the filesystem image from `src/data/` and write it to the `fs` partition defined in `partition_sinOTA.csv`.
+  </Step>
+
+  <Step title="Flash the firmware">
+    Once the filesystem is in place, upload the compiled firmware binary:
+
+    ```bash
+    pio run --target upload
+    ```
+
+    PlatformIO automatically detects the connected serial port. If multiple ports are available, specify one explicitly with `--upload-port /dev/ttyUSB0` (Linux/macOS) or `--upload-port COM3` (Windows).
+  </Step>
+
+  <Step title="Monitor serial output">
+    Open the serial monitor at 115200 baud to observe startup logs:
+
+    ```bash
+    pio device monitor --baud 115200
+    ```
+
+    On a successful Wi-Fi connection you will see:
+
+    ```
+    Ready
+    IP address: 192.168.x.x
+    ```
+
+    If the device launches in AP mode instead, the serial output will show `Iniciado AP` followed by the soft-AP IP address (`192.168.1.1`).
+  </Step>
+</Steps>
+
+## VS Code workflow
+
+If you prefer a graphical interface, the **PlatformIO sidebar** in VS Code exposes every action used above as a clickable button under the `d1_mini_lite` environment:
+
+| Button | Equivalent CLI command |
+|---|---|
+| **Build** | `pio run` |
+| **Upload** | `pio run --target upload` |
+| **Upload Filesystem Image** | `pio run --target uploadfs` |
+| **Serial Monitor** | `pio device monitor --baud 115200` |
+
+Open the PlatformIO tab (the alien-head icon in the activity bar), expand **Project Tasks → d1\_mini\_lite**, and click the relevant task.
+
+<Info>
+  The firmware is configured to run the ESP8266 at **80 MHz** (`board_build.f_cpu = 80000000L`). This is intentional — 80 MHz is sufficient for all display, gesture, HTTP, and JSON tasks in PC diZplay and keeps power consumption lower than the 160 MHz option. If you find the JSON parsing too slow on a particularly large sensor tree, you can change this value to `160000000L` and reflash.
+</Info>

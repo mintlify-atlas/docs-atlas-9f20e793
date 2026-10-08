@@ -1,0 +1,94 @@
+---
+title: "PC diZplay: ESP8266 PC Hardware Monitor Overview"
+sidebarTitle: "Introduction"
+description: "PC diZplay is an ESP8266-based embedded monitor that displays live GPU, CPU, and RAM stats on a compact TFT screen using gesture-based navigation."
+---
+
+PC diZplay is a personal embedded-hardware project that turns a **Wemos D1 Mini (ESP8266)** into a compact, standalone PC hardware monitor. It fetches real-time telemetry — GPU temperature, GPU load, GPU fan speed, CPU temperature, CPU load, and RAM usage — from **LibreHardwareMonitor's** built-in HTTP server and renders them on a **0.96" ST7735 TFT display** (80×160 px). Navigation between metric screens is handled entirely by an **APDS-9960 gesture sensor**, so no buttons or touchscreen are required.
+
+## How it works
+
+Data flows through a simple pipeline that keeps the ESP8266's limited RAM budget manageable:
+
+```
+LibreHardwareMonitor (Windows)
+        │
+        │  HTTP GET /data.json
+        ▼
+  ESP8266 (Wemos D1 Mini)
+        │
+        │  ArduinoJson filtered parse
+        │  StaticJsonDocument<144> filter
+        ▼
+  ST7735 TFT Display (0.96")
+```
+
+1. **LibreHardwareMonitor** runs on the Windows host with its web server enabled. It exposes a rich JSON tree at `http://<PC-IP>:<port>/data.json`.
+2. The ESP8266 issues an HTTP GET to that endpoint using `ESP8266HTTPClient`, streaming the response body directly into ArduinoJson.
+3. A compact JSON filter discards everything except the deeply nested `Value` fields that correspond to the monitored metrics, keeping heap usage low enough to coexist with the TFT and gesture subsystems.
+4. The extracted string value is rendered on the right-hand sprite of the TFT display, while the left-hand sprite shows the metric label (e.g., `GPU:`, `CPU:`, `RAM:`).
+
+<Note>
+  **Memory-efficient JSON parsing** — the firmware uses a `StaticJsonDocument<144>` filter document that matches only the path `Children[0].Children[0].Children[0].Children[0].Value` deep inside LibreHardwareMonitor's tree. The actual deserialization target is a `DynamicJsonDocument(9144)`. This two-document filter technique (introduced in ArduinoJson 6) avoids allocating the full ~100 KB raw JSON on the heap, which would otherwise crash the ESP8266.
+</Note>
+
+## Firmware components
+
+The firmware is organised as a set of focused header files included by `main.cpp`:
+
+| File | Role |
+|---|---|
+| `main.cpp` | Entry point — `setup()` / `loop()`, ISR registration, gesture dispatch |
+| `Settings.hpp` | Global variables: `ssid`, `password`, `url`, and the AP SSID constant `ssid_AP` |
+| `Functions.hpp` | EEPROM and SPIFFS read/write helpers (`saveEeprom`, `readEeprom`, `writeSPIFSS`, `readSPIFSS`), plus `Modowifi()` (checks boot mode) and `defaultWifi()` (resets to AP mode) |
+| `ST7735Config.hpp` | TFT initialisation (`startupST7735`), dual-sprite setup (`img` / `img2`), `drawtext`, `drawvalor`, `CambioPantalla`, and `Pantallasinformativas` |
+| `APDSConfig.hpp` | APDS-9960 I²C pin definitions, `startupAPDS()`, and the `isr_flag` used by the interrupt routine |
+| `WiFiMonitorPC.hpp` | Wi-Fi station startup (`startupWifi`), AP mode startup (`startAP`), NTP client, and `getJSONdata(Pantalla)` |
+| `WebServer.hpp` | `AsyncWebServer` captive-portal routes — serves `index.html` from SPIFFS and handles the POST form that saves credentials and restarts the device |
+
+## Display screens
+
+The firmware defines seven screens via the `Menus` enum in `ST7735Config.hpp`:
+
+| Enum value | Displayed label | Metric |
+|---|---|---|
+| `Gputemp` | `GPU:` | GPU temperature (°C) |
+| `Gpuload` | `GPU:` | GPU load (%) |
+| `Gpufan` | `FAN:` | GPU fan speed (RPM) |
+| `Cputemp` | `CPU:` | CPU temperature (°C) |
+| `Cpuload` | `CPU:` | CPU load (%) |
+| `RAM` | `RAM:` | RAM usage (%) |
+| `Reloj` | *(full screen)* | Current time (HH:MM:SS via NTP) |
+
+Swipe **left/right** with the APDS-9960 to move between metric categories (GPU → CPU → RAM → Clock). Swipe **up/down** to cycle sub-metrics within the GPU group (temperature ↔ load ↔ fan speed).
+
+## Libraries used
+
+| Library | Purpose |
+|---|---|
+| `Bodmer/TFT_eSPI` | ST7735 display driver and sprite engine |
+| `bblanchon/ArduinoJson` | JSON deserialisation with filter support |
+| `arduino-libraries/NTPClient` | Network time for the clock screen |
+| `ottowinter/ESPAsyncWebServer-esphome` | Async HTTP server for the captive portal |
+| `ottowinter/ESPAsyncTCP-esphome` | Async TCP layer required by the web server |
+| `SparkFun APDS9960` | Gesture sensor driver (APDS-9960_Gesture_Sensor_esp8266) |
+| `ESP8266WiFi` | Wi-Fi station and AP management |
+| `EEPROM` | Persistent boot-mode flag storage |
+| `SPIFFS` | Filesystem storage for credentials and web assets |
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Flash the firmware, configure Wi-Fi, and start monitoring in four steps.
+  </Card>
+  <Card title="Wiring" icon="microchip" href="/hardware/wiring">
+    Pin assignments and wiring diagram for the D1 Mini, ST7735, and APDS-9960.
+  </Card>
+  <Card title="Building & Flashing" icon="wrench" href="/firmware/building-flashing">
+    PlatformIO build, SPIFFS upload, and serial monitor instructions.
+  </Card>
+  <Card title="Wi-Fi Setup" icon="wifi" href="/firmware/wifi-setup">
+    Captive-portal configuration and credential management.
+  </Card>
+</CardGroup>

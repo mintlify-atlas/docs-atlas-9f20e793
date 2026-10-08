@@ -1,0 +1,116 @@
+---
+title: "Configure Wi-Fi and LibreHardwareMonitor in PC diZplay"
+sidebarTitle: "Wi-Fi Setup"
+description: "Use PC diZplay's captive-portal AP mode to enter Wi-Fi credentials and the LibreHardwareMonitor URL without reflashing the firmware."
+---
+
+On first boot — or whenever the saved credentials no longer work — PC diZplay launches a Wi-Fi access point and serves a built-in configuration portal. This page explains every trigger that causes the device to enter AP mode, how to connect and submit your credentials, and what happens during the subsequent reboot into station mode.
+
+## When AP mode is triggered
+
+The device enters AP mode under three circumstances:
+
+- **Fresh device or cleared EEPROM** — EEPROM address 250 is not set to `1`, so `Modowifi()` returns `true` and `startAP()` is called immediately in `setup()`.
+- **10 consecutive failed connection attempts** — `startupWifi()` tries to connect in a loop; after the tenth failed attempt, `defaultWifi()` is called, which writes `0` to EEPROM address 250 and reboots the device into AP mode.
+- **3+ consecutive JSON parse errors within 60 seconds** — if `getJSONdata()` cannot deserialise the LibreHardwareMonitor response (e.g. because the PC's IP changed), a counter and timestamp are checked. When more than 3 errors occur within a 60-second window, `defaultWifi()` resets the device to AP mode so you can update the LHM URL.
+
+## Connecting to the portal
+
+<Steps>
+  <Step title="Power on the device">
+    Power on PC diZplay. If AP mode is triggered, the TFT display will show **"Modo AP"** in white text. The device is now broadcasting a Wi-Fi network.
+  </Step>
+
+  <Step title="Join the PC diZplay network">
+    On your phone or laptop, open Wi-Fi settings and connect to the network named **Pc diZplay**. There is no password.
+  </Step>
+
+  <Step title="Open the configuration portal">
+    Your device should automatically open a captive portal browser page. If the redirect does not happen within a few seconds, open a browser and navigate to:
+
+    ```
+    http://192.168.1.1
+    ```
+
+    You will see a dark card with a animated eye graphic and three input fields.
+  </Step>
+
+  <Step title="Fill in the three fields">
+    | Field | Description | Example |
+    |---|---|---|
+    | **Red WiFi** | Your home or office Wi-Fi SSID | `MyHomeNetwork` |
+    | **Contraseña** | Your Wi-Fi password | `hunter2` |
+    | **HM Port** | IP address and port of LibreHardwareMonitor's web server | `192.168.1.40:8085` |
+
+    All three fields are required. The form will not submit if any field is empty.
+  </Step>
+
+  <Step title="Submit and reboot">
+    Click **Aceptar**. The POST handler writes the three values to SPIFFS, sets EEPROM address 250 to `1`, and calls `ESP.restart()`. The device will reboot and attempt to connect to your Wi-Fi network in station mode.
+  </Step>
+</Steps>
+
+## AP mode implementation
+
+The access point and captive DNS server are configured in `startAP()`:
+
+```cpp WiFiMonitorPC.hpp
+void startAP() {
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+  WiFi.softAP("Pc diZplay");
+  dnsServer.setTTL(300);
+  dnsServer.start(DNS_PORT, "Pcdizplay.com", apIP);
+}
+```
+
+The soft-AP is assigned the IP `192.168.1.1`. A DNS server listens on port 53 and resolves all hostnames to `192.168.1.1`, which is what makes the captive portal redirect work on most mobile devices.
+
+## Credential saving — POST handler
+
+When you submit the form, the `initServer()` POST handler in `WebServer.hpp` performs the following actions:
+
+1. Reads the `new_red`, `new_pass`, and `URL_LHM` form parameters from the request.
+2. Calls `writeSPIFSS()` to write each value to `/red.txt`, `/pass.txt`, and `/url.txt` respectively.
+3. Writes `1` to EEPROM address 250 (`EEPROM.write(250, 1)`) and commits.
+4. Calls `ESP.restart()` to reboot into STA mode.
+
+The SSID and password fields are validated client-side (`required` attributes) — the handler only writes to SPIFFS if both `new_pass` and `new_red` are non-empty strings.
+
+## What happens after reboot
+
+`startupWifi()` is called from `setup()` when `Modowifi()` returns `false` (EEPROM 250 == 1):
+
+1. The SSID, password, and LHM URL are read from `/red.txt`, `/pass.txt`, and `/url.txt` via `readSPIFSS()`.
+2. `WiFi.begin(ssid, password)` is called.
+3. While the connection is pending, a blinking **eye animation** plays on the TFT — the device cycles through 19 frames forward and back at 40 ms per frame during each connection poll.
+4. On successful connection, the serial monitor prints `Ready` followed by the assigned IP address, and the NTP client starts.
+
+If the device cannot connect after 10 animation cycles, the retry loop calls `defaultWifi()` and the device falls back to AP mode:
+
+```cpp WiFiMonitorPC.hpp
+while (WiFi.status() != WL_CONNECTED) {
+  // plays eye animation
+  reconnect++;
+  if (reconnect == 10) {
+    Serial.println("No se pudo conectar");
+    defaultWifi();  // resets to AP mode
+  }
+}
+```
+
+<Tip>
+  **To force AP mode at any time** (for example, to update your Wi-Fi password or LHM IP address), uncomment the `defaultWifi();` line near the top of `setup()` in `src/main.cpp`, reflash the firmware, then comment it out again and reflash a second time. Alternatively, intentionally allow 10 failed connection attempts by temporarily taking your router offline or changing its SSID — the device will reset itself to AP mode automatically.
+</Tip>
+
+## Configuring LibreHardwareMonitor
+
+PC diZplay polls LibreHardwareMonitor's built-in HTTP server for sensor data. Before using the device, make sure the web server is enabled:
+
+1. Open **LibreHardwareMonitor** on your PC.
+2. Navigate to **Options → Web Server**.
+3. Check **Run** to start the web server. The default port is **8085**.
+4. Note your PC's local IP address (e.g. `192.168.1.40` from `ipconfig` / `ip addr`).
+5. Enter `<IP>:<port>` (e.g. `192.168.1.40:8085`) in the **HM Port** field of the configuration portal.
+
+Once connected, the device will fetch `http://<IP>:<port>/data.json` on every loop iteration to update the displayed sensor value. If your PC's IP address changes (e.g. due to DHCP lease renewal), the device will detect consecutive JSON parse failures and automatically relaunch the configuration portal so you can enter the new address.

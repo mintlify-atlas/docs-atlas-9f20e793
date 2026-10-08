@@ -1,0 +1,84 @@
+---
+title: "Using the NTP Clock Screen in PC diZplay"
+sidebarTitle: "Clock Mode"
+description: "PC diZplay's Reloj screen shows an NTP-synced clock. Learn how the timezone offset, display layout, and update cycle work, and when the clock is available."
+---
+
+PC diZplay includes an NTP-synchronized clock screen. When the active screen is set to `Reloj`, the device displays the current time instead of polling LibreHardwareMonitor. The clock is the **default screen on startup** — `Pantalla` is initialized to `Reloj` in `ST7735Config.hpp`.
+
+## NTP Configuration
+
+The NTP client is declared and configured in `WiFiMonitorPC.hpp`:
+
+```cpp WiFiMonitorPC.hpp
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org");
+
+// In startupWifi():
+timeClient.begin();
+timeClient.setTimeOffset(-10800); // UTC-3 (Buenos Aires)
+```
+
+| Parameter | Value | Notes |
+|---|---|---|
+| NTP pool | `pool.ntp.org` | Global anycast pool |
+| Time offset | `-10800` seconds | UTC−3 (Buenos Aires / Argentina Standard Time) |
+
+To adjust for your timezone, change the value passed to `setTimeOffset()`:
+
+| Timezone | Offset (seconds) |
+|---|---|
+| UTC | `0` |
+| CET (UTC+1) | `3600` |
+| EST (UTC−5) | `-18000` |
+| CST (UTC−6) | `-21600` |
+| PST (UTC−8) | `-28800` |
+
+## How the Time Is Displayed
+
+`getJSONdata()` returns the full formatted time string from `timeClient.getFormattedTime()` (e.g. `"14:35:22"`) when `Pantalla == Reloj`. The clock screen **inverts** the normal sprite assignment — the time string is split across the two 80×80 sprites as follows:
+
+| Sprite | Screen position | Substring | Example |
+|---|---|---|---|
+| `img2` (pushed to `x=0`) | Left half | `valor.substring(0, 3)` | `"14:"` |
+| `img` (pushed to `x=80`) | Right half | `valor.substring(3, 5)` | `"35"` |
+
+Only hours and minutes are visible at a glance. The seconds component of the formatted string is not rendered.
+
+### `drawvalor()` clock branch
+
+```cpp ST7735Config.hpp
+if (Pantalla == Reloj)
+{
+  img2.fillScreen(TFT_BLACK);
+  img2.setTextSize(1);
+  img2.drawString(valor.substring(0, 3), 10, 20, 7); // "HH:"
+  img2.pushSprite(0, 0);
+
+  img.fillScreen(TFT_BLACK);
+  img.setTextSize(1);
+  img.drawString(valor.substring(3, 5), 5, 20, 7);   // "MM"
+  img.pushSprite(80, 0);
+}
+```
+
+Font `7` in TFT_eSPI is the large built-in 7-segment-style font, making the digits clearly legible across the room.
+
+## NTP Update Frequency
+
+`timeClient.update()` is called inside `getJSONdata()` on every loop iteration — once per HTTP polling cycle. However, the NTPClient library internally **throttles** actual network requests to once every 60 seconds by default. In practice the displayed time is accurate to within one minute and the extra `update()` calls are no-ops unless the 60-second window has elapsed.
+
+## Navigating To and From the Clock
+
+The clock screen participates in the standard gesture navigation:
+
+| Gesture | Current screen | Result |
+|---|---|---|
+| RIGHT | `Reloj` | → `Gputemp` |
+| LEFT | `Gputemp` or `Gpuload` | → `Reloj` |
+
+See [Gesture Navigation](/usage/gesture-navigation) for the complete transition table.
+
+<Note>
+  The clock screen is only available when the device is operating in **STA (connected) mode**. If the ESP8266 falls back to AP mode — because no saved Wi-Fi credentials exist or the connection fails — the firmware runs the captive-portal DNS and web-server loop instead. In AP mode `Reloj` is never reached and gesture navigation is disabled entirely.
+</Note>

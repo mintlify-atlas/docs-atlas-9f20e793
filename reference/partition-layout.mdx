@@ -1,0 +1,71 @@
+---
+title: "ESP8266 Flash Partition Layout for PC diZplay"
+sidebarTitle: "Partition Layout"
+description: "PC diZplay uses a custom no-OTA partition table that maximises application and SPIFFS space, allocating 512 KB to the filesystem for web portal assets."
+---
+
+PC diZplay uses a custom partition table (`partition_sinOTA.csv`) that trades OTA update support for a larger SPIFFS filesystem, giving more space for the web portal assets.
+
+## Partition table
+
+```csv partition_sinOTA.csv
+boot, 2, 0, 0x00000, 16
+code, 0, 0, 0x04000, 1M-16K
+fs,   3, 0, 0xFC000, 512K
+```
+
+### Partition breakdown
+
+| Name | Type | Subtype | Offset | Size | Purpose |
+|---|---|---|---|---|---|
+| `boot` | 2 | 0 | `0x00000` | 16 KB | Bootloader |
+| `code` | 0 | 0 | `0x04000` | ~1 MB | Application firmware |
+| `fs` | 3 | 0 | `0xFC000` | 512 KB | SPIFFS filesystem |
+
+This table is referenced in `platformio.ini` via:
+
+```ini platformio.ini
+board_build.partitions = partition_sinOTA.csv
+```
+
+## SPIFFS contents
+
+The `fs` partition is built from the `src/data/` directory (configured as `data_dir` in `platformio.ini`) and holds the following files at runtime:
+
+| File | Purpose |
+|---|---|
+| `/index.html` | Captive-portal configuration page |
+| `/assets/bootstrap.min.css.gz` | Bootstrap CSS, gzipped to save space |
+| `/red.txt` | Saved Wi-Fi SSID |
+| `/pass.txt` | Saved Wi-Fi password |
+| `/url.txt` | Saved LibreHardwareMonitor IP:port |
+
+The web server in `WebServer.hpp` serves `bootstrap.min.css.gz` with a `Content-Encoding: gzip` header so the browser decompresses it transparently, keeping the filesystem footprint small.
+
+## No OTA partition
+
+By removing the OTA partition, the available code space is maximised for the application firmware. Because there is no second application slot, **firmware updates require a physical USB connection**.
+
+<Warning>
+  Do not enable OTA without first updating the partition table to include an
+  OTA slot. Enabling OTA with this layout will cause the firmware image to
+  exceed the available code partition space and may result in a non-booting
+  device.
+</Warning>
+
+## Flashing the filesystem
+
+The SPIFFS image is built from the `src/data/` directory and uploaded separately from the firmware:
+
+```bash
+pio run --target uploadfs
+```
+
+The `data_dir` in `platformio.ini` is set to `src/data`, so PlatformIO automatically picks up all files in that directory when building the SPIFFS image:
+
+```ini platformio.ini
+[platformio]
+data_dir = src/data
+```
+
+On a first-time setup, ensure that `pass.txt`, `red.txt`, and `url.txt` exist in `src/data/` before uploading — they can be empty files; the captive portal will overwrite them with the credentials you submit.

@@ -1,0 +1,99 @@
+---
+title: "PC diZplay Firmware Configuration Reference"
+sidebarTitle: "Configuration"
+description: "Complete reference for PC diZplay's configurable constants, pin definitions, display menu enum, SPIFFS file layout, and EEPROM flag usage."
+---
+
+PC diZplay's configuration lives in the header files under `include/`. Most settings are defined as compile-time constants or enums and require a reflash to change. Runtime credentials — Wi-Fi SSID, password, and LibreHardwareMonitor URL — are persisted to SPIFFS files, and a single EEPROM byte controls whether the device boots into station (STA) or access-point (AP) mode.
+
+## Pin configuration
+
+The APDS-9960 gesture sensor communicates over I2C and fires a hardware interrupt. All three pins are defined in `include/APDSConfig.hpp`:
+
+| Constant | Value | ESP8266 pin | Purpose |
+|---|---|---|---|
+| `APDS9960_SDA` | `4` | GPIO4 (D2) | I2C data line for the APDS-9960 |
+| `APDS9960_SCL` | `5` | GPIO5 (D1) | I2C clock line for the APDS-9960 |
+| `APDS_INT` | `12` | GPIO12 (D6) | Gesture interrupt — triggered on `FALLING` edge |
+
+The interrupt is attached in `setup()` via `attachInterrupt(digitalPinToInterrupt(APDS_INT), interruptRoutine, FALLING)` and sets the `isr_flag` variable that the main loop checks each iteration.
+
+## Display menus enum
+
+The `Menus` enum in `include/ST7735Config.hpp` defines every screen the TFT can display. Gesture navigation moves between these values; `getJSONdata()` uses the current value to decide which sensor reading to fetch.
+
+| Value | Integer | Meaning | Label shown on TFT |
+|---|---|---|---|
+| `Gputemp` | `0` | GPU temperature (°C) | `GPU:` |
+| `Gpuload` | `1` | GPU utilisation (%) | `GPU:` |
+| `Gpufan` | `2` | GPU fan speed (RPM) | `FAN:` |
+| `Cputemp` | `3` | CPU package temperature (°C) | `CPU:` |
+| `Cpuload` | `4` | CPU total load (%) | `CPU:` |
+| `RAM` | `5` | RAM in use (GB) | `RAM:` |
+| `Reloj` | `6` | NTP wall clock | Full-screen HH:MM display |
+
+The device starts on `Reloj` at power-on (`uint8_t Pantalla = Reloj`). Swipe gestures from the APDS-9960 cycle through the menu hierarchy — right/left to move between GPU, CPU, RAM, and clock groups; up/down to switch between sub-screens within a group (e.g. `Gputemp` ↔ `Gpuload` ↔ `Gpufan`).
+
+## SPIFFS file layout
+
+The `src/data/` directory is flashed to the SPIFFS partition with `pio run --target uploadfs`. All runtime credentials are read from here at startup by `startupWifi()` and written here by the web portal's POST handler.
+
+| File | Content | Purpose |
+|---|---|---|
+| `/red.txt` | Wi-Fi SSID (plain text) | Read by `startupWifi()` into `ssid` |
+| `/pass.txt` | Wi-Fi password (plain text) | Read by `startupWifi()` into `password` |
+| `/url.txt` | LHM IP and port, e.g. `192.168.1.40:8085` | Used by `getJSONdata()` to build the HTTP request URL |
+| `/index.html` | Configuration portal HTML | Served by the async web server in AP mode |
+| `/assets/bootstrap.min.css.gz` | Bootstrap CSS (gzip-compressed) | Served with `Content-Encoding: gzip` and a 24-hour cache header |
+
+## EEPROM layout
+
+EEPROM is initialised with `EEPROM.begin(520)` so that 520 bytes are available. Only the mode flag at address 250 is actively used in the current firmware.
+
+| Address | Value | Meaning |
+|---|---|---|
+| `250` | `1` | **STA mode** — valid credentials have been saved; boot normally |
+| `250` | `0` (or any value ≠ 1) | **AP mode** — no saved credentials; launch the configuration portal |
+| `0–49` | SSID characters | Legacy EEPROM credential storage (superseded by SPIFFS) |
+| `100–149` | Password characters | Legacy EEPROM credential storage (superseded by SPIFFS) |
+
+<Note>
+  Credential storage was migrated from EEPROM to SPIFFS during development. The EEPROM byte-range reads/writes for SSID and password (`saveEeprom`/`readEeprom` in `Functions.hpp`) are no longer called in the main flow. **Only address 250** — the AP/STA mode flag — is read and written at runtime. Do not rely on the legacy EEPROM credential fields.
+</Note>
+
+## NTP timezone offset
+
+The NTP client is configured in `include/WiFiMonitorPC.hpp`:
+
+```cpp WiFiMonitorPC.hpp
+timeClient.setTimeOffset(-10800);
+```
+
+The offset `-10800` represents **UTC−3 (Buenos Aires / Argentina Standard Time)**. To adjust for your own timezone, change this value to the appropriate UTC offset in seconds before flashing:
+
+| Timezone | Offset (seconds) |
+|---|---|
+| UTC−5 (Eastern Standard Time) | `-18000` |
+| UTC−3 (Buenos Aires) | `-10800` |
+| UTC+0 (London / UTC) | `0` |
+| UTC+1 (Central European Time) | `3600` |
+| UTC+8 (China Standard Time) | `28800` |
+
+## JSON data extraction paths
+
+`getJSONdata()` in `WiFiMonitorPC.hpp` fetches `http://<IP>:<port>/data.json` from LibreHardwareMonitor and navigates the nested `Children` array to find each sensor value. The exact indices used are listed below:
+
+| Screen | JSON path | Notes |
+|---|---|---|
+| `Gputemp` | `Children[0][3][2][0].Value` | GPU temperature node |
+| `Gpuload` | `Children[0][3][3][0].Value` | GPU load node |
+| `Gpufan` | `Children[0][3][4][0].Value` | GPU fan RPM node |
+| `Cputemp` | `Children[0][1][3][6].Value` | CPU package temp (index 6 — Package) |
+| `Cpuload` | `Children[0][1][4][0].Value` | CPU total load node |
+| `RAM` | `Children[0][2][0][0].Value` | RAM used (GB) node |
+
+The `Value` field is a string like `"65.0 °C"` or `"42.3 %"`; the firmware takes only the first two characters with `.substring(0, 2)` before rendering on the TFT.
+
+<Warning>
+  These array indices are **hardware-specific**. The LibreHardwareMonitor sensor tree is structured differently depending on your GPU model, CPU, and installed drivers. If your readings are missing or incorrect (showing `--`), inspect your own tree by browsing to `http://<PC-IP>:8085/data.json` in a browser and tracing the `Children` path to the sensor you want. Update the indices in `getJSONdata()` accordingly and reflash.
+</Warning>

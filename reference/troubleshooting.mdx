@@ -1,0 +1,128 @@
+---
+title: "PC diZplay Troubleshooting Guide"
+sidebarTitle: "Troubleshooting"
+description: "Solutions to the most common problems encountered when building, flashing, wiring, and running the PC diZplay ESP8266 hardware monitor."
+---
+
+This page covers the most common problems encountered when building, flashing, and running PC diZplay, along with their solutions.
+
+<AccordionGroup>
+
+  <Accordion title="Device keeps restarting in a loop">
+    **Likely cause:** missing or insufficient decoupling capacitor on the power rail.
+
+    The ESP8266 can draw a significant current spike during Wi-Fi activity. Without adequate decoupling this causes a brief voltage drop (brownout) that triggers an automatic reset, which then causes another Wi-Fi connection attempt — producing a continuous restart loop.
+
+    **Solution:** add a **220 µF electrolytic capacitor** between the 5 V and GND pins as close to the D1 Mini as possible. This is noted in the project source (`main.cpp`):
+
+    > *"Importante: Se agregó un capacitor de 220 uf en la alimentación."*
+  </Accordion>
+
+  <Accordion title="Device always boots into AP mode">
+    The device enters AP mode (broadcasting the `"Pc diZplay"` network) when `Modowifi()` returns `true`, which happens when EEPROM byte 250 is not set to `1`. This can occur for several reasons:
+
+    - **Never configured:** the device has not yet received credentials through the captive portal, so byte 250 has never been written.
+    - **Manually reset:** `defaultWifi()` was called (or triggered by repeated JSON errors), which writes `0` to byte 250 before restarting.
+    - **Unreachable network:** `startupWifi()` makes up to **10** connection attempts. If all fail, `defaultWifi()` is called and the device falls back to AP mode.
+
+    **Solution:** connect your phone or laptop to the `"Pc diZplay"` Wi-Fi network, navigate to `http://192.168.1.1` (or wait for the captive-portal redirect), and submit your Wi-Fi SSID, password, and LibreHardwareMonitor IP:port. On a successful POST the device writes byte 250 to `1` and restarts in station mode.
+  </Accordion>
+
+  <Accordion title="TFT display stays black">
+    Work through the following checks in order:
+
+    - **SPI wiring:** verify every SPI pin (MOSI, SCLK, CS, DC, RST) matches the `User_Setup.h` you configured for TFT_eSPI.
+    - **Voltage:** the ST7735 logic and backlight must be powered from **3.3 V**, not 5 V.
+    - **Byte swap:** `setSwapBytes(true)` must be called inside `startupST7735()`. This is required for correct 16-bit colour rendering on the ST7735 and is already present in `ST7735Config.hpp`:
+      ```cpp ST7735Config.hpp
+      tft.init();
+      tft.setRotation(3);
+      tft.setSwapBytes(true);
+      ```
+    - **Rotation:** if the image appears mirrored or rotated rather than black, try different values for `tft.setRotation()` (0–3).
+  </Accordion>
+
+  <Accordion title="Gesture sensor not responding">
+    The APDS-9960 is configured in `APDSConfig.hpp`. Check the following:
+
+    - **I2C wiring:** SDA → D2 (GPIO 4), SCL → D1 (GPIO 5), INT → D6 (GPIO 12).
+    - **Voltage:** the APDS-9960 VCC must be **3.3 V**.
+    - **Gesture gain:** the firmware initialises the sensor with `apds.setGestureGain(0)`. If gestures are not detected reliably, increase this value — try `apds.setGestureGain(1)` or higher.
+    - **Infrared interference:** direct sunlight or strong incandescent light on the sensor window will saturate the IR photodiodes and prevent gesture detection. Shield the sensor from ambient IR sources.
+    - **Interrupt pin:** confirm the interrupt is configured correctly in `main.cpp`:
+      ```cpp main.cpp
+      pinMode(digitalPinToInterrupt(APDS_INT), INPUT);
+      attachInterrupt(digitalPinToInterrupt(APDS_INT), interruptRoutine, FALLING);
+      ```
+      The `APDS_INT` constant is defined as pin `12` (D6) in `APDSConfig.hpp`.
+  </Accordion>
+
+  <Accordion title="Display shows '--' instead of a sensor value">
+    The `Nan` string `"--"` is returned by `getJSONdata()` when JSON parsing fails or the requested path does not exist in the filtered document. Work through these checks:
+
+    - **LHM not running:** verify LibreHardwareMonitor is open, running as administrator, and has the web server enabled under **Options → Web Server**.
+    - **Wrong URL:** open `http://<IP>:8085/data.json` in a browser from another device on the same network to confirm LHM is reachable. The value stored in `/url.txt` (and shown in the captive portal) must be `<IP>:<port>` — for example `192.168.1.40:8085` — **without** the `http://` prefix.
+    - **Wrong sensor indices:** the paths in `getJSONdata()` are derived from one specific hardware configuration. If your LHM sensor tree has a different number of entries (different GPU, extra CPU packages, etc.) the indices will be wrong and the path will return `null`. Open the raw JSON in a browser, find your target sensor, count the nesting levels, and update the indices in `WiFiMonitorPC.hpp` accordingly.
+  </Accordion>
+
+  <Accordion title="Clock shows the wrong time">
+    The NTP timezone offset is hardcoded in `startupWifi()` inside `WiFiMonitorPC.hpp`:
+
+    ```cpp WiFiMonitorPC.hpp
+    timeClient.begin();
+    timeClient.setTimeOffset(-10800); // UTC-3 (Argentina)
+    ```
+
+    Update the argument to `setTimeOffset()` to match your UTC offset **in seconds** before reflashing.
+
+    | Timezone | Offset (seconds) |
+    |---|---|
+    | UTC | `0` |
+    | CET (UTC+1) | `3600` |
+    | EET (UTC+2) | `7200` |
+    | EST (UTC-5) | `-18000` |
+    | CST (UTC-6) | `-21600` |
+    | PST (UTC-8) | `-28800` |
+  </Accordion>
+
+  <Accordion title="pio run --target uploadfs fails">
+    - **data_dir not set:** `platformio.ini` must declare `data_dir = src/data` under the `[platformio]` section. This is already present in the project configuration.
+    - **Missing files:** the SPIFFS image requires all target files to exist in `src/data/` before the upload command is run. At minimum, create empty placeholder files:
+      - `src/data/pass.txt`
+      - `src/data/red.txt`
+      - `src/data/url.txt`
+
+      Empty files are fine — the captive portal will overwrite them when credentials are submitted.
+    - **Port busy:** ensure no serial monitor or other process is holding the COM/tty port open while uploading.
+  </Accordion>
+
+  <Accordion title="After submitting the portal form, the device does not reboot">
+    The POST handler in `WebServer.hpp` only proceeds when both `new_red` (SSID) and `new_pass` (password) fields are non-empty:
+
+    ```cpp WebServer.hpp
+    if (np != "" && nr != "") {
+        writeSPIFSS("/red.txt", nr);
+        writeSPIFSS("/pass.txt", np);
+        writeSPIFSS("/url.txt", url);
+        EEPROM.write(250, 1);
+        EEPROM.commit();
+        ESP.restart();
+    }
+    ```
+
+    - Ensure both fields are filled in before submitting (the HTML form uses the `required` attribute, but some browsers may bypass this).
+    - If SPIFFS failed to mount on startup, `writeSPIFSS()` will silently fail. Check the serial output for `"An Error has occurred while mounting SPIFFS"` and re-upload the filesystem image with `pio run --target uploadfs`.
+  </Accordion>
+
+</AccordionGroup>
+
+## Serial debug tips
+
+<Tip>
+  Run `pio device monitor --baud 115200` with the device connected over USB to
+  observe runtime output. The firmware prints the saved SSID and password at
+  startup, the assigned IP address after a successful Wi-Fi connection, and
+  `deserializeJson() failed:` followed by the error reason whenever JSON
+  parsing fails. These messages are the fastest way to diagnose connectivity
+  and configuration problems.
+</Tip>

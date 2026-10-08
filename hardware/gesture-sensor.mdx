@@ -1,0 +1,120 @@
+---
+title: "APDS-9960 Gesture Sensor Setup for PC diZplay"
+sidebarTitle: "Gesture Sensor"
+description: "Configure the APDS-9960 for PC diZplay: I2C setup, interrupt-driven gesture detection, gesture gain tuning, and the full gesture-to-screen navigation map."
+---
+
+PC diZplay uses the APDS-9960 RGB and gesture sensor for touchless menu navigation. Gestures are detected via a hardware interrupt on the ESP8266, keeping the main loop free to poll LibreHardwareMonitor and refresh the display between swipes — no blocking gesture polling required.
+
+## Sensor Specifications
+
+| Property        | Value                                      |
+|-----------------|--------------------------------------------|
+| Part            | APDS-9960                                  |
+| Interface       | I²C                                        |
+| SDA             | GPIO4 (D2)                                 |
+| SCL             | GPIO5 (D1)                                 |
+| INT pin         | GPIO12 (D6) — falling-edge interrupt       |
+| Supply voltage  | 3.3 V                                      |
+| Library         | SparkFun APDS9960 (ESP8266 variant)         |
+
+## Initialisation — `startupAPDS()`
+
+`startupAPDS()` is called once in `setup()` after `Wire.begin()` has been started on the correct SDA/SCL pins:
+
+```cpp APDSConfig.hpp
+#define APDS9960_SDA 4  // GPIO4 (D2)
+#define APDS9960_SCL 5  // GPIO5 (D1)
+
+const byte APDS_INT = 12; // GPIO12 (D6)
+boolean isr_flag = 0;
+
+SparkFun_APDS9960 apds = SparkFun_APDS9960();
+
+void startupAPDS()
+{
+  if (apds.init())
+  {
+    // Serial.println(F("APDS-9960 initialization complete"));
+  }
+  else
+  {
+    // Serial.println(F("Something went wrong during APDS-9960 init!"));
+  }
+
+  // Start running the APDS-9960 gesture sensor engine
+  if (apds.enableGestureSensor(true))
+  {
+    // Serial.println(F("Gesture sensor is now running"));
+  }
+  else
+  {
+    // Serial.println(F("Something went wrong during gesture sensor init!"));
+  }
+
+  apds.setGestureGain(0);
+}
+```
+
+Each call has a distinct role:
+
+- **`apds.init()`** — configures the APDS-9960's internal registers over I²C and confirms the sensor is reachable on the bus. Returns `true` on success.
+- **`apds.enableGestureSensor(true)`** — activates the gesture engine inside the APDS-9960. Passing `true` also enables the sensor's internal interrupt output, which will drive the INT pin LOW whenever a gesture result is ready.
+- **`apds.setGestureGain(0)`** — sets the photodiode gain for the gesture engine to its lowest setting (`GGAIN_1X`). Lower gain reduces false triggers in bright indoor environments and is the value that worked reliably in the original build.
+
+<Tip>
+  `setGestureGain(0)` sets the lowest gain, which works best in typical indoor lighting. If gestures are not being reliably detected — for example in a darker room or when the sensor is further from your hand — try incrementing the value (`1`, `2`, or `3`) to increase sensitivity.
+</Tip>
+
+## Interrupt-Driven Architecture
+
+Rather than polling `apds.isGestureAvailable()` in a tight loop, the firmware uses a hardware interrupt so the ESP8266 can spend most of its time fetching hardware data and refreshing the display.
+
+### How it works
+
+1. `pinMode` configures GPIO12 as an input.
+2. `attachInterrupt` registers `interruptRoutine` as the handler for a **FALLING** edge on that pin — i.e., when the APDS-9960 pulls INT LOW to signal a result.
+3. Inside the ISR, only the `isr_flag` boolean is set. No I²C calls are made inside the ISR — I²C is not safe to use in an interrupt context on the ESP8266.
+4. In `loop()`, the flag is checked. When set, the interrupt is temporarily detached so a new edge cannot fire while reading the result, `gestos()` reads the gesture direction, `CambioPantalla()` updates the display label, the flag is cleared, and the interrupt is re-attached.
+
+### ISR and loop snippet
+
+```cpp main.cpp
+void IRAM_ATTR interruptRoutine() {
+  isr_flag = 1;
+}
+
+// In loop():
+if (isr_flag == 1) {
+  detachInterrupt(digitalPinToInterrupt(APDS_INT));
+  gestos();
+  CambioPantalla(Pantalla);
+  isr_flag = 0;
+  attachInterrupt(digitalPinToInterrupt(APDS_INT), interruptRoutine, FALLING);
+}
+```
+
+- **`IRAM_ATTR`** — places the ISR function in IRAM (instruction RAM) rather than flash. This is mandatory on the ESP8266: interrupt handlers must reside in IRAM because flash access (where normal code lives) may be temporarily suspended during Wi-Fi operations, which would cause a crash if the ISR ran from flash at that moment.
+- **`detachInterrupt` / `attachInterrupt`** — brackets the gesture read to prevent a second interrupt from corrupting `Pantalla` while `gestos()` is mid-execution.
+
+## Gesture-to-Screen Mapping
+
+The `gestos()` function reads the gesture direction from the APDS-9960 and updates the global `Pantalla` variable. `CambioPantalla()` then redraws the label sprite for the new screen.
+
+| Gesture | From Screen            | To Screen  |
+|---------|------------------------|------------|
+| UP      | `Gputemp`              | `Gpuload`  |
+| UP      | `Cputemp`              | `Cpuload`  |
+| UP      | `Gpufan`               | `Gputemp`  |
+| DOWN    | `Gpuload`              | `Gputemp`  |
+| DOWN    | `Gputemp`              | `Gpufan`   |
+| DOWN    | `Cpuload`              | `Cputemp`  |
+| RIGHT   | `Gputemp` or `Gpuload` | `Cputemp`  |
+| RIGHT   | `Cputemp` or `Cpuload` | `RAM`      |
+| RIGHT   | `Reloj`                | `Gputemp`  |
+| RIGHT   | `RAM`                  | `Gputemp`  |
+| LEFT    | `Gputemp` or `Gpuload` | `Reloj`    |
+| LEFT    | `Cputemp` or `Cpuload` | `Gputemp`  |
+| LEFT    | `RAM`                  | `Cputemp`  |
+
+UP and DOWN navigate between the temperature and load readings for a given component (GPU or CPU), and also expose the GPU fan speed screen below `Gputemp`. LEFT and RIGHT navigate between components and the clock, forming a horizontal ring: `Reloj` ↔ `Gputemp`/`Gpuload` ↔ `Cputemp`/`Cpuload` ↔ `RAM`.
