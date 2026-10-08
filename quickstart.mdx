@@ -10,7 +10,7 @@ This guide walks you through everything needed to go from an empty Wemos D1 Mini
   **Prerequisites — gather these before you start:**
 
   - Wemos D1 Mini (ESP8266)
-  - ST7735 0.96" 80×160 TFT display
+  - ST7735 0.96\" 80×160 TFT display
   - APDS-9960 gesture sensor
   - 220 µF electrolytic capacitor (required when powering from USB)
   - [PlatformIO](https://platformio.org/) installed — either the VS Code extension or the standalone CLI
@@ -55,11 +55,20 @@ This guide walks you through everything needed to go from an empty Wemos D1 Mini
   <Step title="Upload the filesystem and flash the firmware">
     PC diZplay stores Wi-Fi credentials and the captive-portal web page in SPIFFS. You must upload the filesystem **before** (or alongside) the firmware, otherwise the device cannot serve the configuration page or read saved credentials.
 
+    The `src/data/` directory (configured as `data_dir` in `platformio.ini`) contains the following files that are bundled into the SPIFFS image:
+
+    | File | Purpose |
+    |---|---|
+    | `index.html` | Captive-portal configuration page |
+    | `red.txt` | Saved Wi-Fi SSID |
+    | `pass.txt` | Saved Wi-Fi password |
+    | `url.txt` | Saved LibreHardwareMonitor host and port |
+    | `assets/bootstrap.min.css.gz` | Compressed CSS served by the web server |
+
     Upload the SPIFFS image first, then flash the firmware:
 
     ```bash
     # 1. Build and upload the SPIFFS filesystem image
-    #    (contains index.html, pass.txt, red.txt, url.txt, and Bootstrap CSS)
     pio run --target uploadfs
 
     # 2. Compile and flash the firmware
@@ -84,12 +93,12 @@ This guide walks you through everything needed to go from an empty Wemos D1 Mini
        - **Wi-Fi SSID** — the name of your home/office network.
        - **Wi-Fi Password** — your network password.
        - **LibreHardwareMonitor URL** — the IP address and port of your PC, e.g. `192.168.1.40:8085`.
-    4. Click **Submit**. The device saves the credentials to SPIFFS and restarts automatically.
+    4. Click **Submit**. The device saves the credentials to SPIFFS (`red.txt`, `pass.txt`, `url.txt`) and restarts automatically.
 
-    After rebooting, PC diZplay connects to your Wi-Fi network, syncs the time via NTP, and begins polling LibreHardwareMonitor. The TFT display switches from the "Modo AP" splash to the first hardware metric screen.
+    After rebooting, PC diZplay connects to your Wi-Fi network. The firmware makes up to **10 connection attempts**; if all 10 fail it resets to AP mode so you can correct the credentials. Once connected, the device syncs the time via NTP and begins polling LibreHardwareMonitor. The TFT display switches from the "Modo AP" splash to the first hardware metric screen.
 
     <Note>
-      If the device cannot reach LibreHardwareMonitor after three consecutive failures within 60 seconds, it resets itself back to AP mode so you can correct the URL without re-flashing.
+      If the device connects to Wi-Fi but cannot reach LibreHardwareMonitor (wrong IP, server not running, or PC asleep), it increments an error counter. After **more than 3 consecutive JSON errors within 60 seconds**, it automatically resets to AP mode so you can correct the URL without re-flashing.
     </Note>
   </Step>
 </Steps>

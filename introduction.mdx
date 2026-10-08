@@ -4,7 +4,7 @@ sidebarTitle: "Introduction"
 description: "PC diZplay is an ESP8266-based embedded monitor that displays live GPU, CPU, and RAM stats on a compact TFT screen using gesture-based navigation."
 ---
 
-PC diZplay is a personal embedded-hardware project that turns a **Wemos D1 Mini (ESP8266)** into a compact, standalone PC hardware monitor. It fetches real-time telemetry — GPU temperature, GPU load, GPU fan speed, CPU temperature, CPU load, and RAM usage — from **LibreHardwareMonitor's** built-in HTTP server and renders them on a **0.96" ST7735 TFT display** (80×160 px). Navigation between metric screens is handled entirely by an **APDS-9960 gesture sensor**, so no buttons or touchscreen are required.
+PC diZplay is a personal embedded-hardware project that turns a **Wemos D1 Mini (ESP8266)** into a compact, standalone PC hardware monitor. It fetches real-time telemetry — GPU temperature, GPU load, GPU fan speed, CPU temperature, CPU load, and RAM usage — from **LibreHardwareMonitor's** built-in HTTP server and renders them on a **0.96\" ST7735 TFT display** (80×160 px). Navigation between metric screens is handled entirely by an **APDS-9960 gesture sensor**, so no buttons or touchscreen are required.
 
 ## How it works
 
@@ -43,6 +43,7 @@ The firmware is organised as a set of focused header files included by `main.cpp
 | `Functions.hpp` | EEPROM and SPIFFS read/write helpers (`saveEeprom`, `readEeprom`, `writeSPIFSS`, `readSPIFSS`), plus `Modowifi()` (checks boot mode) and `defaultWifi()` (resets to AP mode) |
 | `ST7735Config.hpp` | TFT initialisation (`startupST7735`), dual-sprite setup (`img` / `img2`), `drawtext`, `drawvalor`, `CambioPantalla`, and `Pantallasinformativas` |
 | `APDSConfig.hpp` | APDS-9960 I²C pin definitions, `startupAPDS()`, and the `isr_flag` used by the interrupt routine |
+| `Eye.h` | PROGMEM animation frame data (19 frames, 160×80 px) displayed on the TFT during the Wi-Fi connection sequence |
 | `WiFiMonitorPC.hpp` | Wi-Fi station startup (`startupWifi`), AP mode startup (`startAP`), NTP client, and `getJSONdata(Pantalla)` |
 | `WebServer.hpp` | `AsyncWebServer` captive-portal routes — serves `index.html` from SPIFFS and handles the POST form that saves credentials and restarts the device |
 
@@ -50,15 +51,15 @@ The firmware is organised as a set of focused header files included by `main.cpp
 
 The firmware defines seven screens via the `Menus` enum in `ST7735Config.hpp`:
 
-| Enum value | Displayed label | Metric |
-|---|---|---|
-| `Gputemp` | `GPU:` | GPU temperature (°C) |
-| `Gpuload` | `GPU:` | GPU load (%) |
-| `Gpufan` | `FAN:` | GPU fan speed (RPM) |
-| `Cputemp` | `CPU:` | CPU temperature (°C) |
-| `Cpuload` | `CPU:` | CPU load (%) |
-| `RAM` | `RAM:` | RAM usage (%) |
-| `Reloj` | *(full screen)* | Current time (HH:MM:SS via NTP) |
+| Enum value | Integer | Displayed label | Metric |
+|---|---|---|---|
+| `Gputemp` | `0` | `GPU:` | GPU temperature (°C) |
+| `Gpuload` | `1` | `GPU:` | GPU load (%) |
+| `Gpufan` | `2` | `FAN:` | GPU fan speed (RPM) |
+| `Cputemp` | `3` | `CPU:` | CPU temperature (°C) |
+| `Cpuload` | `4` | `CPU:` | CPU load (%) |
+| `RAM` | `5` | `RAM:` | RAM usage (%) |
+| `Reloj` | `6` | *(full screen)* | Current time (HH:MM:SS via NTP) |
 
 Swipe **left/right** with the APDS-9960 to move between metric categories (GPU → CPU → RAM → Clock). Swipe **up/down** to cycle sub-metrics within the GPU group (temperature ↔ load ↔ fan speed).
 
@@ -70,7 +71,7 @@ Swipe **left/right** with the APDS-9960 to move between metric categories (GPU �
 | `bblanchon/ArduinoJson` | JSON deserialisation with filter support |
 | `arduino-libraries/NTPClient` | Network time for the clock screen |
 | `ottowinter/ESPAsyncWebServer-esphome` | Async HTTP server for the captive portal |
-| `ottowinter/ESPAsyncTCP-esphome` | Async TCP layer required by the web server |
+| `ESPAsyncTCP` | Async TCP layer required by the web server (pulled as a dependency) |
 | `SparkFun APDS9960` | Gesture sensor driver (APDS-9960_Gesture_Sensor_esp8266) |
 | `ESP8266WiFi` | Wi-Fi station and AP management |
 | `EEPROM` | Persistent boot-mode flag storage |

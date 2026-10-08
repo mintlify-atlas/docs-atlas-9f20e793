@@ -11,7 +11,7 @@ This page lists every hardware component, wiring prerequisite, and PC-side softw
 | Component | Specification | Notes |
 |---|---|---|
 | Microcontroller | Wemos D1 Mini (ESP8266) | PlatformIO target: `d1_mini_lite` |
-| Display | ST7735, 0.96", 80×160 px | SPI interface, driven by the TFT_eSPI library |
+| Display | ST7735, 0.96\", 80×160 px | SPI interface, driven by the TFT_eSPI library |
 | Gesture sensor | APDS-9960 | I²C — SDA on GPIO4/D2, SCL on GPIO5/D1, INT on GPIO12/D6 |
 | Capacitor | 220 µF electrolytic | Required when the D1 Mini is powered from USB |
 | PC software | LibreHardwareMonitor | Must be running with the built-in web server enabled |
@@ -53,10 +53,16 @@ PC diZplay has no local sensor reading capability — all hardware telemetry is 
 - The built-in web server must be **enabled** via **Options → Web Server → Run**.
 - Default port: **8085** (configurable in LibreHardwareMonitor).
 
-The device polls the following endpoint on every loop iteration:
+The device polls the following endpoint on every loop iteration, where the `url` variable (read from `/url.txt` in SPIFFS) holds the host and port entered during captive-portal setup:
 
 ```
-GET http://<PC-IP>:<port>/data.json
+GET http://<url>/data.json
+```
+
+For example, if `url.txt` contains `192.168.1.40:8085`, the request becomes:
+
+```
+GET http://192.168.1.40:8085/data.json
 ```
 
 The response is a deeply nested JSON tree. The firmware uses an ArduinoJson filter to extract only the `Value` fields at nesting depth 4:
@@ -74,7 +80,7 @@ deserializeJson(doc, http.getStream(),
 The full LibreHardwareMonitor JSON response can exceed 100 KB; the filter ensures only the required leaf values are retained in the 9144-byte heap document.
 
 <Note>
-  If LibreHardwareMonitor is not reachable (wrong IP, server not running, PC asleep), the device increments an error counter. After **three consecutive errors within 60 seconds**, it automatically resets to AP mode so you can correct the URL via the captive portal without re-flashing.
+  If LibreHardwareMonitor is not reachable (wrong IP, server not running, PC asleep), the device increments an error counter. After **more than 3 consecutive errors within 60 seconds**, it automatically resets to AP mode so you can correct the URL via the captive portal without re-flashing.
 </Note>
 
 ## Power notes

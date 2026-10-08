@@ -12,7 +12,7 @@ The device enters AP mode under three circumstances:
 
 - **Fresh device or cleared EEPROM** — EEPROM address 250 is not set to `1`, so `Modowifi()` returns `true` and `startAP()` is called immediately in `setup()`.
 - **10 consecutive failed connection attempts** — `startupWifi()` tries to connect in a loop; after the tenth failed attempt, `defaultWifi()` is called, which writes `0` to EEPROM address 250 and reboots the device into AP mode.
-- **3+ consecutive JSON parse errors within 60 seconds** — if `getJSONdata()` cannot deserialise the LibreHardwareMonitor response (e.g. because the PC's IP changed), a counter and timestamp are checked. When more than 3 errors occur within a 60-second window, `defaultWifi()` resets the device to AP mode so you can update the LHM URL.
+- **More than 3 consecutive JSON parse errors within 60 seconds** — if `getJSONdata()` cannot deserialise the LibreHardwareMonitor response (e.g. because the PC's IP changed), a counter and timestamp are checked. When more than 3 errors (`CountError > 3`) occur within a 60-second window, `defaultWifi()` resets the device to AP mode so you can update the LHM URL.
 
 ## Connecting to the portal
 

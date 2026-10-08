@@ -16,7 +16,7 @@ PC diZplay organises hardware metrics across seven screens defined by the `Menus
 | CPU Temperature | `Cputemp` | `CPU:` | Package temp °C | `Children[0][1][3][6].Value` |
 | CPU Load | `Cpuload` | `CPU:` | Total load % | `Children[0][1][4][0].Value` |
 | RAM Usage | `RAM` | `RAM:` | Used RAM in GB | `Children[0][2][0][0].Value` |
-| Clock | `Reloj` | *(none)* | NTP time HH:MM:SS | `timeClient.getFormattedTime()` |
+| Clock | `Reloj` | *(none)* | NTP time HH:MM | `timeClient.getFormattedTime()` |
 
 ### Default screen
 
@@ -32,8 +32,8 @@ Each screen is composed of two 80×80 pixel sprites that together fill the 160×
 
 | Sprite | Position | Content |
 |---|---|---|
-| `img2` (left) | `x=0, y=0` | Metric label (e.g. `GPU:`, `CPU:`, `RAM:`, `FAN:`) |
-| `img` (right) | `x=80, y=0` | Metric value |
+| `img` (left) | `x=0, y=0` | Metric label (e.g. `GPU:`, `CPU:`, `RAM:`, `FAN:`) |
+| `img2` (right) | `x=80, y=0` | Metric value |
 
 For all hardware metric screens the label is drawn with `drawtext()` in `CambioPantalla()`, and the value is drawn with `drawvalor()`. The value is always the first 2 characters of the raw JSON string, extracted via `.substring(0, 2)`. The clock screen inverts which sprite carries which content — see [Clock Mode](/usage/clock-mode) for the exact split.
 
@@ -59,4 +59,4 @@ enum Menus
 } Menus;
 ```
 
-The active screen is stored in the global `uint8_t Pantalla` variable. Gesture handling in `main.cpp` updates `Pantalla`, and `CambioPantalla()` redraws the label sprite to match.
+The active screen is stored in the global `uint8_t Pantalla` variable. Gesture handling in `main.cpp` updates `Pantalla`, and `CambioPantalla()` redraws the label sprite to match. `CambioPantalla()` has no `case` for `Reloj` — the clock screen never calls `drawtext()` because the label sprite is not used; time is rendered entirely inside `drawvalor()`.

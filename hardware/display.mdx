@@ -1,5 +1,5 @@
 ---
-title: "ST7735 TFT Display Configuration for PC diZplay"
+title: "ST7735 TFT Display Setup and Configuration for PC diZplay"
 sidebarTitle: "TFT Display"
 description: "Configure the ST7735 0.96\" 80×160 TFT display for PC diZplay, including landscape orientation, dual-sprite flicker-free rendering, and custom fonts."
 ---
@@ -20,12 +20,12 @@ PC diZplay uses a 0.96″ ST7735 80×160 TFT display driven by the [TFT_eSPI](ht
 
 The display is initialised in landscape orientation via `setRotation(3)`, which makes the visible area **160 px wide × 80 px tall**. That area is then divided into two 80×80 sprites:
 
-| Sprite | Object | `pushSprite` x | Normal screens              | Clock screen (`Reloj`)        |
-|--------|--------|----------------|-----------------------------|-------------------------------|
-| Left   | `img`  | `0`            | Metric label (`GPU:`, `CPU:`, `RAM:`, `FAN:`) | Seconds (`SS`) — last 2 chars |
-| Right  | `img2` | `80`           | Numeric value               | Hours + minutes (`HH:MM`) — first 3 chars |
+| Sprite | Object | Normal `pushSprite` x | Normal screens                                | Clock screen (`Reloj`) `pushSprite` x | Clock screen content                    |
+|--------|--------|-----------------------|-----------------------------------------------|---------------------------------------|-----------------------------------------|
+| `img`  | `img`  | `0`                   | Metric label (`GPU:`, `CPU:`, `RAM:`, `FAN:`) | `80`                                  | Minutes (`MM`) — `substring(3, 5)`     |
+| `img2` | `img2` | `80`                  | Numeric value                                 | `0`                                   | Hours + colon (`HH:`) — `substring(0, 3)` |
 
-For the **Reloj** (clock) screen the roles are swapped: `img2` is pushed to `x=0` and displays the `HH:MM` portion of the NTP time string (first 3 characters, e.g. `"12:"`), while `img` is pushed to `x=80` and displays the seconds (last 2 characters, e.g. `"45"`).
+For the **Reloj** (clock) screen the sprite roles are swapped: `img2` is pushed to `x=0` and displays the hours-and-colon portion of the NTP time string (first 3 characters, e.g. `"12:"`), while `img` is pushed to `x=80` and displays the minutes (characters 3–4, e.g. `"45"`).
 
 ## Initialisation — `startupST7735()`
 
@@ -90,7 +90,7 @@ void drawvalor(String valor)
 ```
 
 - The **font index `7`** passed as the last argument to `drawString()` selects TFT_eSPI's large built-in seven-segment-style number font, which gives crisp, bold numerals at any size.
-- For the clock, `valor` contains the full NTP time string (e.g. `"12:45:09"`). `substring(0, 3)` extracts `"12:"` and `substring(3, 5)` extracts `"45"`.
+- For the clock, `valor` contains the full NTP time string in `"HH:MM:SS"` format (e.g. `"12:45:09"`). `substring(0, 3)` extracts the hours and colon (`"12:"`) for `img2`, and `substring(3, 5)` extracts the minutes (`"45"`) for `img`.
 
 ## Switching the Label — `CambioPantalla()`
 
@@ -131,13 +131,13 @@ void CambioPantalla(uint8_t Pantalla)
 
 The project bundles several bitmap fonts in `include/Fuentes/`:
 
-| File         | Font name / purpose                                             |
-|--------------|-----------------------------------------------------------------|
-| `font.h`     | **`Orbitron_Medium_27`** — used for metric labels on `img`      |
-| `Org_01.h`   | Alternative compact font                                        |
-| `7bit.h`     | Seven-segment style (alternative numeric display)               |
-| `Gpu.h`      | GPU-specific decorative font variant                            |
-| `Gpu2.h`     | GPU-specific decorative font variant 2                          |
-| `Gpu3.h`     | GPU-specific decorative font variant 3 (active include)         |
+| File         | Included in firmware | Font name / purpose                                        |
+|--------------|----------------------|------------------------------------------------------------|
+| `font.h`     | ✓                    | **`Orbitron_Medium_27`** — used for metric labels on `img` |
+| `Org_01.h`   | ✓                    | Alternative compact font                                   |
+| `7bit.h`     | ✓                    | Seven-segment style (alternative numeric display)          |
+| `Gpu3.h`     | ✓                    | GPU-specific decorative font variant 3                     |
+| `Gpu.h`      | ✗                    | GPU-specific decorative font variant 1 (not included)      |
+| `Gpu2.h`     | ✗                    | GPU-specific decorative font variant 2 (not included)      |
 
-The firmware currently includes `font.h` (for labels) and `Gpu3.h` via `ST7735Config.hpp`. Numeric values on the right sprite use TFT_eSPI's built-in font 7 (`drawString(..., 7)`), which does not require a separate header.
+`ST7735Config.hpp` includes `font.h`, `Org_01.h`, `7bit.h`, and `Gpu3.h`. Numeric values on the right sprite use TFT_eSPI's built-in font 7 (`drawString(..., 7)`), which does not require a separate header.

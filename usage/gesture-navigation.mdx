@@ -165,8 +165,16 @@ This detach/re-attach pattern prevents spurious re-entrancy and is the recommend
 ```cpp APDSConfig.hpp
 void startupAPDS()
 {
-  apds.init();
-  apds.enableGestureSensor(true);
+  if (apds.init())
+  {
+    // APDS-9960 initialization complete
+  }
+
+  if (apds.enableGestureSensor(true))
+  {
+    // Gesture sensor is now running
+  }
+
   apds.setGestureGain(0);
 }
 ```

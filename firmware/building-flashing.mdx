@@ -50,7 +50,7 @@ The `data_dir = src/data` directive tells PlatformIO to use the `src/data/` fold
   </Step>
 
   <Step title="Upload the SPIFFS filesystem image">
-    The SPIFFS image **must be flashed before the firmware** if this is a fresh device or if the credential files have been wiped. This step uploads the entire contents of `src/data/` — including `index.html`, `pass.txt`, `red.txt`, and `url.txt` — to the SPIFFS partition on the chip.
+    The SPIFFS image **must be flashed before the firmware** if this is a fresh device or if the credential files have been wiped. This step uploads the entire contents of `src/data/` — including `index.html`, `pass.txt`, `red.txt`, `url.txt`, and `assets/bootstrap.min.css.gz` — to the SPIFFS partition on the chip.
 
     ```bash
     pio run --target uploadfs

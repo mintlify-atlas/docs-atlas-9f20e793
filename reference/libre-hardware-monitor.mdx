@@ -1,5 +1,5 @@
 ---
-title: "LibreHardwareMonitor Integration with PC diZplay"
+title: "PC diZplay LibreHardwareMonitor HTTP API Integration"
 sidebarTitle: "LibreHardwareMonitor"
 description: "PC diZplay polls LibreHardwareMonitor's HTTP server, parses a filtered JSON tree to minimise ESP8266 RAM use, and maps sensor values to display screens."
 ---
@@ -18,7 +18,7 @@ PC diZplay reads hardware sensor data from LibreHardwareMonitor's (LHM) built-in
 
 `getJSONdata()` in `WiFiMonitorPC.hpp` issues an HTTP GET request to:
 
-```
+```http
 GET http://<IP>:<port>/data.json
 ```
 
@@ -103,6 +103,7 @@ if (error)
     Serial.println(error.f_str());
     CountError++;
     tiempo2 = millis() - tiempo2;
+    Serial.println(tiempo2);
     if ((CountError > 3) && (tiempo2 < 60000))
     {
         defaultWifi();
